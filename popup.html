@@ -1,67 +1,106 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Docker Monitor</title>
-    <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8">
+  <title>Docker Container Monitor</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="window">
-        <div class="titlebar" id="titlebar">
-            <div class="title">Docker Monitor</div>
-            <div class="window-controls">
-                <button id="pinWindow" class="pin-button" title="Pin window">📌</button>
-                <button id="refreshAll" class="refresh-button" title="Refresh all">🔄</button>
-            </div>
-        </div>
-        <div class="container">
-            <div class="metrics-section">
-                <div id="metricsGrid" class="metrics-grid">
-                    <div class="metric-card">
-                        <h3>CPU Usage</h3>
-                        <div id="cpuUsage" class="metric-value">-</div>
-                    </div>
-                    <div class="metric-card">
-                        <h3>Memory Usage</h3>
-                        <div id="memoryUsage" class="metric-value">-</div>
-                    </div>
-                    <div class="metric-card">
-                        <h3>Network I/O</h3>
-                        <div id="networkIO" class="metric-value">-</div>
-                    </div>
-                    <div class="metric-card">
-                        <h3>Disk I/O</h3>
-                        <div id="diskIO" class="metric-value">-</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="containers-section">
-                <div class="section-header">
-                    <h2>Containers</h2>
-                    <div class="loading-spinner" id="containersLoading"></div>
-                </div>
-                <div id="containersList" class="containers-list"></div>
-            </div>
-
-            <div class="logs-section">
-                <div class="section-header">
-                    <h2>Container Logs</h2>
-                    <div class="loading-spinner" id="logsLoading"></div>
-                </div>
-                <div class="logs-controls">
-                    <select id="containerSelect">
-                        <option value="">Select Container</option>
-                    </select>
-                    <div class="search-container">
-                        <input type="text" id="searchInput" placeholder="Search logs...">
-                        <button id="searchBtn">Search</button>
-                    </div>
-                    <button id="refreshLogs">Refresh</button>
-                </div>
-                <div id="logsOutput" class="logs-output"></div>
-            </div>
-        </div>
+  <div id="container" class="draggable">
+    <div id="header">
+      <h1>Docker Container Monitor</h1>
+      <div class="controls">
+        <input type="text" id="search-logs" placeholder="Search logs...">
+        <button id="refresh-btn">Refresh</button>
+        <button id="settings-btn">Settings</button>
+      </div>
     </div>
-    <script src="popup.js"></script>
+    
+    <div id="metrics-summary">
+      <h2>System Overview</h2>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-title">Total Containers</span>
+          <span id="total-containers" class="metric-value">0</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-title">Running</span>
+          <span id="running-containers" class="metric-value">0</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-title">CPU Usage</span>
+          <span id="total-cpu" class="metric-value">0%</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-title">Memory Usage</span>
+          <span id="total-memory" class="metric-value">0 MB</span>
+        </div>
+      </div>
+    </div>
+    
+    <div id="containers-list">
+      <h2>Containers</h2>
+      <div id="containers-grid"></div>
+    </div>
+    
+    <div id="container-details" class="hidden">
+      <div class="details-header">
+        <button id="back-btn">Back</button>
+        <h2 id="container-name">Container Name</h2>
+      </div>
+      
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="metrics">Metrics</button>
+        <button class="tab-btn" data-tab="logs">Logs</button>
+        <button class="tab-btn" data-tab="info">Info</button>
+      </div>
+      
+      <div id="metrics-tab" class="tab-content active">
+        <div class="metrics-charts">
+          <div class="chart-container">
+            <h3>CPU Usage</h3>
+            <canvas id="cpu-chart"></canvas>
+          </div>
+          <div class="chart-container">
+            <h3>Memory Usage</h3>
+            <canvas id="memory-chart"></canvas>
+          </div>
+          <div class="chart-container">
+            <h3>Network I/O</h3>
+            <canvas id="network-chart"></canvas>
+          </div>
+          <div class="chart-container">
+            <h3>Disk I/O</h3>
+            <canvas id="disk-chart"></canvas>
+          </div>
+        </div>
+      </div>
+      
+      <div id="logs-tab" class="tab-content">
+        <div class="logs-controls">
+          <input type="text" id="logs-search" placeholder="Filter logs...">
+          <select id="logs-lines">
+            <option value="50">50 lines</option>
+            <option value="100">100 lines</option>
+            <option value="200">200 lines</option>
+            <option value="500">500 lines</option>
+          </select>
+          <button id="logs-refresh">Refresh</button>
+        </div>
+        <pre id="logs-content"></pre>
+      </div>
+      
+      <div id="info-tab" class="tab-content">
+        <div id="container-info"></div>
+      </div>
+    </div>
+    
+    <div id="alerts-panel">
+      <h3>Alerts</h3>
+      <div id="alerts-list"></div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
 </body>
 </html> 

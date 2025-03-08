@@ -1,32 +1,30 @@
 {
   "manifest_version": 3,
-  "name": "Docker Monitor",
+  "name": "Docker Container Monitor",
   "version": "1.0",
-  "description": "Monitor Docker containers, logs, and system usage",
+  "description": "Monitor Docker containers running on your system",
   "permissions": [
     "storage",
-    "notifications",
     "alarms",
-    "webRequest"
+    "notifications"
   ],
   "host_permissions": [
-    "http://localhost:2375/*",
-    "http://127.0.0.1:2375/*",
-    "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://localhost:2375/*"
   ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "images/icon16.png",
+      "48": "images/icon48.png",
+      "128": "images/icon128.png"
+    }
+  },
   "background": {
     "service_worker": "background.js"
   },
-  "action": {
-    "default_popup": "popup.html",
-    "default_icon": "icons/icon128.png"
-  },
   "icons": {
-    "128": "icons/icon128.png"
-  },
-  "web_accessible_resources": [{
-    "resources": ["icons/*"],
-    "matches": ["<all_urls>"]
-  }]
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  }
 } 
