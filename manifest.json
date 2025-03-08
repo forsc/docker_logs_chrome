@@ -10,7 +10,8 @@
   ],
   "host_permissions": [
     "http://localhost:2375/*",
-    "http://127.0.0.1:2375/*"
+    "http://127.0.0.1:2375/*",
+    "http://unix:*"
   ],
   "background": {
     "service_worker": "background.js"
