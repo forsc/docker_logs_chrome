@@ -57,7 +57,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 300);
 
     // Load initial data
-    debouncedLoadContainers();
+    loadContainers(); // Immediate load
+    debouncedLoadContainers(); // Setup debounced updates
     startMetricsUpdates();
 
     // Event listeners
@@ -126,7 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadContainers() {
         try {
             const response = await chrome.runtime.sendMessage({ action: 'getContainers' });
+            console.log('Containers response:', response);
             containers = Array.isArray(response) ? response : [];
+            console.log('Processed containers:', containers);
             updateContainersList();
             updateContainerSelect();
         } catch (error) {
@@ -137,16 +140,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Update containers list UI
     function updateContainersList() {
-        if (!containersList) return;
+        console.log('Updating containers list, element exists:', !!containersList);
+        if (!containersList) {
+            console.error('Container list element not found!');
+            return;
+        }
         
         containersList.innerHTML = '';
         if (containers.length === 0) {
+            console.log('No containers to display');
             containersList.innerHTML = '<div class="no-containers">No containers found</div>';
             return;
         }
 
+        console.log('Rendering containers:', containers.length);
         containers.forEach(container => {
-            if (!container || !container.Id) return;
+            if (!container || !container.Id) {
+                console.log('Skipping invalid container:', container);
+                return;
+            }
 
             const card = document.createElement('div');
             card.className = `container-card ${getContainerStatusClass(container.State)}`;
@@ -255,9 +267,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function updateMetrics() {
         try {
             const containers = await chrome.runtime.sendMessage({ action: 'getContainers' });
-            if (!Array.isArray(containers) || containers.length === 0) return;
+            console.log('Metrics containers response:', containers);
+            if (!Array.isArray(containers) || containers.length === 0) {
+                console.log('No containers found for metrics');
+                return;
+            }
 
             const totalMetrics = containers.reduce((acc, container) => {
+                console.log('Processing metrics for container:', container.Id);
                 const metrics = container.metrics || {};
                 return {
                     cpu: acc.cpu + (metrics.cpu || 0),
@@ -273,6 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }, { cpu: 0, memory: 0, network: { rx: 0, tx: 0 }, disk: { read: 0, write: 0 } });
 
+            console.log('Calculated metrics:', totalMetrics);
             updateMetricDisplay('cpuUsage', `${totalMetrics.cpu.toFixed(2)}%`);
             updateMetricDisplay('memoryUsage', formatBytes(totalMetrics.memory));
             updateMetricDisplay('networkIO', `↓${formatBytes(totalMetrics.network.rx)}/s\n↑${formatBytes(totalMetrics.network.tx)}/s`);
@@ -285,9 +303,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update metric display
     function updateMetricDisplay(elementId, value) {
         const element = document.getElementById(elementId);
-        if (element) {
-            element.textContent = value;
+        if (!element) {
+            console.error(`Metric element not found: ${elementId}`);
+            return;
         }
+        console.log(`Updating metric ${elementId} with value:`, value);
+        element.textContent = value;
     }
 
     // Start periodic metrics updates
