@@ -1,9 +1,16 @@
 // Docker API endpoints in order of preference
 const DOCKER_API_ENDPOINTS = [
-    'unix:///var/run/docker.sock',  // Linux default socket
-    'http://localhost:2375',        // TCP fallback
-    'http://127.0.0.1:2375'         // TCP fallback alternative
+    'http://localhost:2375',        // TCP primary
+    'http://127.0.0.1:2375'         // TCP alternative
 ];
+
+// Check if we're on Windows
+const isWindows = navigator.platform.toLowerCase().includes('win');
+
+if (!isWindows) {
+    // Only add Unix socket for non-Windows platforms
+    DOCKER_API_ENDPOINTS.unshift('unix:///var/run/docker.sock');
+}
 
 let ACTIVE_DOCKER_API = null;
 let connectionRetryCount = 0;
@@ -13,18 +20,36 @@ const MAX_RETRIES = 3;
 async function unixSocketFetch(path, options = {}) {
     try {
         console.log('Attempting Unix socket connection...', path);
-        // Try Unix socket first (for Linux)
-        const response = await fetch(`http://unix:/var/run/docker.sock:${path}`, {
+        if (isWindows) {
+            throw new Error('Unix socket not supported on Windows');
+        }
+
+        // Ensure the path starts with a slash
+        const apiPath = path.startsWith('/') ? path : `/${path}`;
+        
+        // Format the URL properly for Unix socket
+        const url = `http://localhost${apiPath}`;
+        
+        const response = await fetch(url, {
             ...options,
             headers: {
                 ...options.headers,
                 'Host': 'localhost'
             }
         });
+
+        if (!response.ok) {
+            console.error('Unix socket request failed:', response.status, response.statusText);
+            throw new Error(`Unix socket request failed: ${response.status}`);
+        }
+
         console.log('Unix socket response:', response.status, response.statusText);
         return response;
     } catch (error) {
         console.error('Unix socket connection failed:', error.message);
+        if (error.message.includes('Failed to fetch')) {
+            console.log('This might be a CORS issue or the Docker socket is not accessible');
+        }
         throw error;
     }
 }
@@ -33,9 +58,9 @@ async function unixSocketFetch(path, options = {}) {
 async function dockerFetch(path, options = {}) {
     if (!ACTIVE_DOCKER_API) {
         console.log('No active Docker API, attempting to find endpoint...');
-        await findActiveDockerEndpoint();
-        if (!ACTIVE_DOCKER_API) {
-            throw new Error('No active Docker API endpoint');
+        const success = await findActiveDockerEndpoint();
+        if (!success || !ACTIVE_DOCKER_API) {
+            throw new Error('No active Docker API endpoint available');
         }
     }
 
@@ -56,17 +81,32 @@ async function dockerFetch(path, options = {}) {
             }
         };
 
+        let response;
         if (ACTIVE_DOCKER_API.startsWith('unix://')) {
-            return await unixSocketFetch(path, finalOptions);
+            response = await unixSocketFetch(path, finalOptions);
         } else {
-            const response = await fetch(`${ACTIVE_DOCKER_API}${path}`, finalOptions);
+            response = await fetch(`${ACTIVE_DOCKER_API}${path}`, finalOptions);
             console.log('TCP response:', response.status, response.statusText);
-            return response;
         }
+
+        // Check if the response is ok
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        return response;
     } catch (error) {
         console.error('Docker API request failed:', error.message);
         console.error('Full error:', error);
-        ACTIVE_DOCKER_API = null; // Reset on error
+        
+        // Only reset the API endpoint if it's a connection error
+        if (error.message.includes('Failed to fetch') || 
+            error.message.includes('NetworkError') ||
+            error.message.includes('ECONNREFUSED')) {
+            console.log('Connection error detected, resetting API endpoint');
+            ACTIVE_DOCKER_API = null;
+        }
+        
         throw error;
     }
 }
@@ -83,6 +123,11 @@ async function findActiveDockerEndpoint() {
         console.error('1. Is Docker running?');
         console.error('2. Is the Docker API exposed?');
         console.error('3. Check your firewall settings');
+        if (isWindows) {
+            console.error('4. For Windows: Make sure "Expose daemon on tcp://localhost:2375 without TLS" is enabled in Docker Desktop');
+        } else {
+            console.error('4. For Linux: Check Docker socket permissions (sudo chmod 666 /var/run/docker.sock)');
+        }
         return false;
     }
 
@@ -92,9 +137,12 @@ async function findActiveDockerEndpoint() {
             let response;
             
             if (endpoint.startsWith('unix://')) {
+                if (isWindows) {
+                    console.log('Skipping Unix socket on Windows');
+                    continue;
+                }
                 response = await unixSocketFetch('/version');
             } else {
-                // Add proper headers for version check
                 response = await fetch(`${endpoint}/version`, {
                     headers: {
                         'Accept': 'application/json',
@@ -103,12 +151,17 @@ async function findActiveDockerEndpoint() {
                 });
             }
 
-            if (response.ok) {
-                const version = await response.json();
-                console.log('Docker version info:', version);
-                console.log(`Successfully connected to Docker API at ${endpoint}`);
-                
-                // Test container list endpoint specifically
+            if (!response.ok) {
+                console.log(`Endpoint ${endpoint} returned status ${response.status}`);
+                continue;
+            }
+
+            const version = await response.json();
+            console.log('Docker version info:', version);
+            console.log(`Successfully connected to Docker API at ${endpoint}`);
+            
+            // Test container list endpoint
+            try {
                 const containerResponse = await fetch(`${endpoint}/containers/json?all=1`, {
                     headers: {
                         'Accept': 'application/json',
@@ -127,6 +180,9 @@ async function findActiveDockerEndpoint() {
                 ACTIVE_DOCKER_API = endpoint;
                 connectionRetryCount = 0; // Reset counter on successful connection
                 return true;
+            } catch (containerError) {
+                console.error(`Container endpoint test failed for ${endpoint}:`, containerError);
+                continue;
             }
         } catch (error) {
             console.log(`Failed to connect to ${endpoint}:`, error.message);
