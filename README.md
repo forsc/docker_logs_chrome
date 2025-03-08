@@ -25,7 +25,21 @@ A Chrome extension for monitoring Docker containers, their logs, system usage, a
    Edit or create `/etc/docker/daemon.json`:
    ```json
    {
-     "hosts": ["tcp://localhost:2375", "unix:///var/run/docker.sock"]
+     "builder": {
+       "gc": {
+         "defaultKeepStorage": "20GB",
+         "enabled": true
+       }
+     },
+     "experimental": false,
+     "features": {
+       "buildkit": true
+     },
+     "expose-api": true,
+     "hosts": [
+       "tcp://localhost:2375",
+       "npipe:////.//pipe//docker_engine"
+     ]
    }
    ```
 
