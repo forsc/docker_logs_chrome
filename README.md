@@ -13,42 +13,38 @@ A Chrome extension for monitoring Docker containers, their logs, system usage, a
 
 ## Prerequisites
 
-- Docker daemon running on your system
+- Docker Desktop for Windows (or Docker daemon for Linux)
 - Chrome browser
 
 ## Setup
 
-### Docker API Configuration
+### Windows Docker Desktop Configuration
 
-1. Configure Docker to expose its API:
+1. Right-click on the Docker Desktop icon in the system tray
+2. Select "Settings"
+3. Click on "General" in the left sidebar
+4. Check the option "Expose daemon on tcp://localhost:2375 without TLS"
+5. Click "Apply & Restart"
+6. Wait for Docker Desktop to restart completely
 
-   Edit or create `/etc/docker/daemon.json`:
-   ```json
-   {
-     "builder": {
-       "gc": {
-         "defaultKeepStorage": "20GB",
-         "enabled": true
-       }
-     },
-     "experimental": false,
-     "features": {
-       "buildkit": true
-     },
-     "expose-api": true,
-     "hosts": [
-       "tcp://localhost:2375",
-       "npipe:////.//pipe//docker_engine"
-     ]
-   }
-   ```
+Note: If Docker Desktop fails to start after this change:
+1. Right-click Docker Desktop icon and select "Quit Docker Desktop"
+2. Open Task Manager and end any remaining Docker processes
+3. Start Docker Desktop again
 
-2. Restart Docker daemon:
-   ```bash
-   sudo systemctl restart docker
-   ```
+### Linux Docker API Configuration
 
-   Note: Make sure to secure your Docker API if the machine is accessible from the network.
+If you're using Linux, edit or create `/etc/docker/daemon.json`:
+```json
+{
+  "hosts": ["unix:///var/run/docker.sock", "tcp://localhost:2375"]
+}
+```
+
+Then restart the Docker daemon:
+```bash
+sudo systemctl restart docker
+```
 
 ### Chrome Extension Installation
 
@@ -66,13 +62,45 @@ A Chrome extension for monitoring Docker containers, their logs, system usage, a
 5. Monitor system metrics in real-time
 6. Receive notifications for container errors or health status changes
 
-## Extension Structure
+## Troubleshooting
 
-- `manifest.json` - Extension configuration
-- `popup.html` - Main UI
-- `popup.js` - UI logic
-- `background.js` - Background processes and Docker API communication
-- `styles.css` - Styling
+### Windows-specific Issues
+
+1. If Docker Desktop won't start:
+   - Open Windows PowerShell as Administrator
+   - Run: `net stop com.docker.service`
+   - Start Docker Desktop again
+
+2. If you can't connect to the API:
+   - Make sure Docker Desktop is fully started (check the whale icon in taskbar)
+   - Try running this in PowerShell to test the connection:
+     ```powershell
+     Invoke-RestMethod -Uri 'http://localhost:2375/version'
+     ```
+   - Check Windows Defender Firewall settings
+   - Temporarily disable antivirus to test if it's blocking the connection
+
+3. Common fixes:
+   - Restart Docker Desktop
+   - Clear Docker Desktop settings and reset to factory defaults
+   - Reinstall Docker Desktop if persistent issues occur
+
+### Linux-specific Issues
+
+1. Check Docker daemon status:
+   ```bash
+   sudo systemctl status docker
+   ```
+
+2. Test API connection:
+   ```bash
+   curl http://localhost:2375/version
+   ```
+
+3. Check firewall settings:
+   ```bash
+   sudo ufw status
+   ```
 
 ## Security Considerations
 
@@ -80,14 +108,6 @@ A Chrome extension for monitoring Docker containers, their logs, system usage, a
 - Make sure your Docker API is properly secured
 - Do not expose Docker API to the network without proper security measures
 - Consider using HTTPS and authentication for production environments
-
-## Troubleshooting
-
-- Ensure Docker daemon is running and the API is exposed
-- Check that port 2375 is accessible locally
-- Verify Chrome extension permissions
-- Check Chrome DevTools console for errors
-- Make sure your Docker daemon configuration is correct
 
 ## License
 

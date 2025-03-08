@@ -1,11 +1,12 @@
 // Try different Docker API endpoints
 const DOCKER_API_ENDPOINTS = [
     'http://localhost:2375',
-    'http://127.0.0.1:2375',
-    'npipe:////.//pipe//docker_engine' // Windows named pipe
+    'http://127.0.0.1:2375'
 ];
 
 let ACTIVE_DOCKER_API = null;
+let connectionRetryCount = 0;
+const MAX_RETRIES = 3;
 
 // Initialize alarm for periodic checks
 chrome.alarms.create('checkDockerStatus', {
@@ -14,24 +15,38 @@ chrome.alarms.create('checkDockerStatus', {
 
 // Test Docker API endpoints and set the active one
 async function findActiveDockerEndpoint() {
+    if (connectionRetryCount >= MAX_RETRIES) {
+        console.error('Max retry attempts reached. Please check if Docker Desktop is running and the API is exposed.');
+        return false;
+    }
+
     for (const endpoint of DOCKER_API_ENDPOINTS) {
         try {
-            const response = await fetch(`${endpoint}/containers/json?all=1`);
+            console.log(`Attempting to connect to ${endpoint}...`);
+            const response = await fetch(`${endpoint}/version`);
             if (response.ok) {
+                const version = await response.json();
+                console.log(`Connected to Docker API at ${endpoint}`, version);
                 ACTIVE_DOCKER_API = endpoint;
-                console.log(`Connected to Docker API at: ${endpoint}`);
+                connectionRetryCount = 0; // Reset counter on successful connection
                 return true;
             }
         } catch (error) {
             console.log(`Failed to connect to ${endpoint}:`, error);
         }
     }
-    console.error('Could not connect to any Docker API endpoint');
+
+    connectionRetryCount++;
+    console.error(`Could not connect to Docker API. Attempt ${connectionRetryCount} of ${MAX_RETRIES}`);
     return false;
 }
 
 // Initialize connection
-findActiveDockerEndpoint();
+findActiveDockerEndpoint().then(success => {
+    if (!success) {
+        console.error('Failed to connect to Docker API. Please check if Docker Desktop is running and properly configured.');
+    }
+});
 
 // Listen for alarm
 chrome.alarms.onAlarm.addListener((alarm) => {
