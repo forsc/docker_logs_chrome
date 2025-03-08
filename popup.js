@@ -10,6 +10,52 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedContainerId = '';
     let containers = [];
 
+    // Debounce function for performance
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // Enhance loadContainers with debouncing and loading indicator
+    const debouncedLoadContainers = debounce(async () => {
+        const loadingSpinner = document.querySelector('.loading-spinner');
+        if (loadingSpinner) loadingSpinner.classList.add('active');
+        
+        try {
+            const containers = await chrome.runtime.sendMessage({ action: 'getContainers' });
+            updateContainersList(containers);
+        } catch (error) {
+            showError('Failed to load containers: ' + error.message);
+        } finally {
+            if (loadingSpinner) loadingSpinner.classList.remove('active');
+        }
+    }, 300);
+
+    // Enhance loadContainerLogs with debouncing and loading indicator
+    const debouncedLoadContainerLogs = debounce(async (containerId) => {
+        const logsLoadingSpinner = document.querySelector('.logs-loading-spinner');
+        if (logsLoadingSpinner) logsLoadingSpinner.classList.add('active');
+        
+        try {
+            const logs = await chrome.runtime.sendMessage({
+                action: 'getContainerLogs',
+                containerId: containerId
+            });
+            displayLogs(logs);
+        } catch (error) {
+            showError('Failed to load logs: ' + error.message);
+        } finally {
+            if (logsLoadingSpinner) logsLoadingSpinner.classList.remove('active');
+        }
+    }, 300);
+
     // Load initial data
     debouncedLoadContainers();
     startMetricsUpdates();
@@ -69,52 +115,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function setTranslate(xPos, yPos, el) {
         el.style.transform = `translate(${xPos}px, ${yPos}px)`;
     }
-
-    // Debounce function for performance
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
-
-    // Enhance loadContainers with debouncing and loading indicator
-    const debouncedLoadContainers = debounce(async () => {
-        const loadingSpinner = document.querySelector('.loading-spinner');
-        if (loadingSpinner) loadingSpinner.classList.add('active');
-        
-        try {
-            const containers = await chrome.runtime.sendMessage({ action: 'getContainers' });
-            updateContainersList(containers);
-        } catch (error) {
-            showError('Failed to load containers: ' + error.message);
-        } finally {
-            if (loadingSpinner) loadingSpinner.classList.remove('active');
-        }
-    }, 300);
-
-    // Enhance loadContainerLogs with debouncing and loading indicator
-    const debouncedLoadContainerLogs = debounce(async (containerId) => {
-        const logsLoadingSpinner = document.querySelector('.logs-loading-spinner');
-        if (logsLoadingSpinner) logsLoadingSpinner.classList.add('active');
-        
-        try {
-            const logs = await chrome.runtime.sendMessage({
-                action: 'getContainerLogs',
-                containerId: containerId
-            });
-            displayLogs(logs);
-        } catch (error) {
-            showError('Failed to load logs: ' + error.message);
-        } finally {
-            if (logsLoadingSpinner) logsLoadingSpinner.classList.remove('active');
-        }
-    }, 300);
 
     // Initialize draggable functionality
     document.addEventListener('mousedown', dragStart);
