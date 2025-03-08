@@ -17,7 +17,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Event listeners
     containerSelect.addEventListener('change', (e) => {
         selectedContainerId = e.target.value;
-        loadContainerLogs(selectedContainerId);
+        if (selectedContainerId) {
+            loadContainerLogs(selectedContainerId);
+        }
     });
 
     searchBtn.addEventListener('click', () => {
@@ -34,22 +36,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load containers list
     async function loadContainers() {
-        const response = await chrome.runtime.sendMessage({ action: 'getContainers' });
-        containers = response || [];
-        updateContainersList();
-        updateContainerSelect();
+        try {
+            const response = await chrome.runtime.sendMessage({ action: 'getContainers' });
+            containers = Array.isArray(response) ? response : [];
+            updateContainersList();
+            updateContainerSelect();
+        } catch (error) {
+            console.error('Error loading containers:', error);
+            showError('Failed to load containers. Please check if Docker is running.');
+        }
     }
 
     // Update containers list UI
     function updateContainersList() {
+        if (!containersList) return;
+        
         containersList.innerHTML = '';
+        if (containers.length === 0) {
+            containersList.innerHTML = '<div class="no-containers">No containers found</div>';
+            return;
+        }
+
         containers.forEach(container => {
+            if (!container || !container.Id) return;
+
             const card = document.createElement('div');
-            card.className = `container-card ${container.status === 'running' ? 'running' : 'stopped'}`;
+            card.className = `container-card ${getContainerStatusClass(container.State)}`;
+            
+            const name = container.Names && container.Names[0] ? 
+                        container.Names[0].replace('/', '') : 
+                        'Unnamed Container';
+            
+            const shortId = container.Id ? container.Id.slice(0, 12) : 'Unknown ID';
+            const state = container.State || 'unknown';
+
             card.innerHTML = `
-                <h3>${container.name}</h3>
-                <p>Status: ${container.status}</p>
-                <p>ID: ${container.id.slice(0, 12)}</p>
+                <h3>${escapeHtml(name)}</h3>
+                <p>Status: ${escapeHtml(state)}</p>
+                <p>ID: ${escapeHtml(shortId)}</p>
             `;
             containersList.appendChild(card);
         });
@@ -57,11 +81,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Update container select dropdown
     function updateContainerSelect() {
+        if (!containerSelect) return;
+
         containerSelect.innerHTML = '<option value="">Select Container</option>';
         containers.forEach(container => {
+            if (!container || !container.Id) return;
+
             const option = document.createElement('option');
-            option.value = container.id;
-            option.textContent = container.name;
+            option.value = container.Id;
+            const name = container.Names && container.Names[0] ? 
+                        container.Names[0].replace('/', '') : 
+                        'Unnamed Container';
+            option.textContent = name;
             containerSelect.appendChild(option);
         });
     }
@@ -70,47 +101,63 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadContainerLogs(containerId) {
         if (!containerId) return;
 
-        const response = await chrome.runtime.sendMessage({
-            action: 'getLogs',
-            containerId
-        });
+        try {
+            const response = await chrome.runtime.sendMessage({
+                action: 'getLogs',
+                containerId
+            });
 
-        if (response.error) {
-            logsOutput.innerHTML = `<p class="error">${response.error}</p>`;
-            return;
+            if (response.error) {
+                showError(response.error);
+                return;
+            }
+
+            displayLogs(response.logs || []);
+        } catch (error) {
+            console.error('Error loading logs:', error);
+            showError('Failed to load container logs');
         }
-
-        displayLogs(response.logs);
     }
 
     // Search logs
     async function searchLogs(containerId, query) {
-        const response = await chrome.runtime.sendMessage({
-            action: 'searchLogs',
-            containerId,
-            searchQuery: query
-        });
+        if (!containerId || !query) return;
 
-        if (response.error) {
-            logsOutput.innerHTML = `<p class="error">${response.error}</p>`;
-            return;
+        try {
+            const response = await chrome.runtime.sendMessage({
+                action: 'searchLogs',
+                containerId,
+                searchQuery: query
+            });
+
+            if (response.error) {
+                showError(response.error);
+                return;
+            }
+
+            displayLogs(response.logs || []);
+        } catch (error) {
+            console.error('Error searching logs:', error);
+            showError('Failed to search logs');
         }
-
-        displayLogs(response.logs);
     }
 
     // Display logs in the UI
     function displayLogs(logs) {
+        if (!logsOutput) return;
+
         logsOutput.innerHTML = '';
+        if (!Array.isArray(logs) || logs.length === 0) {
+            logsOutput.innerHTML = '<div class="no-logs">No logs found</div>';
+            return;
+        }
+
         logs.forEach(log => {
+            if (!log) return;
+
             const logLine = document.createElement('div');
-            logLine.className = 'log-line';
-            if (log.level === 'error') {
-                logLine.classList.add('error');
-            } else if (log.level === 'warning') {
-                logLine.classList.add('warning');
-            }
-            logLine.textContent = `[${log.timestamp}] ${log.message}`;
+            logLine.className = `log-line ${log.level || 'info'}`;
+            logLine.textContent = `[${log.timestamp || ''}] ${log.message || ''}`;
             logsOutput.appendChild(logLine);
         });
         logsOutput.scrollTop = logsOutput.scrollHeight;
@@ -118,30 +165,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Update metrics
     async function updateMetrics() {
-        const containers = await chrome.runtime.sendMessage({ action: 'getContainers' });
-        
-        if (!containers || !containers.length) return;
+        try {
+            const containers = await chrome.runtime.sendMessage({ action: 'getContainers' });
+            if (!Array.isArray(containers) || containers.length === 0) return;
 
-        const totalMetrics = containers.reduce((acc, container) => {
-            return {
-                cpu: acc.cpu + (container.metrics?.cpu || 0),
-                memory: acc.memory + (container.metrics?.memory || 0),
-                network: {
-                    rx: acc.network.rx + (container.metrics?.network?.rx || 0),
-                    tx: acc.network.tx + (container.metrics?.network?.tx || 0)
-                },
-                disk: {
-                    read: acc.disk.read + (container.metrics?.disk?.read || 0),
-                    write: acc.disk.write + (container.metrics?.disk?.write || 0)
-                }
-            };
-        }, { cpu: 0, memory: 0, network: { rx: 0, tx: 0 }, disk: { read: 0, write: 0 } });
+            const totalMetrics = containers.reduce((acc, container) => {
+                const metrics = container.metrics || {};
+                return {
+                    cpu: acc.cpu + (metrics.cpu || 0),
+                    memory: acc.memory + (metrics.memory || 0),
+                    network: {
+                        rx: acc.network.rx + (metrics.network?.rx || 0),
+                        tx: acc.network.tx + (metrics.network?.tx || 0)
+                    },
+                    disk: {
+                        read: acc.disk.read + (metrics.disk?.read || 0),
+                        write: acc.disk.write + (metrics.disk?.write || 0)
+                    }
+                };
+            }, { cpu: 0, memory: 0, network: { rx: 0, tx: 0 }, disk: { read: 0, write: 0 } });
 
-        // Update metrics display
-        document.getElementById('cpuUsage').textContent = `${totalMetrics.cpu.toFixed(2)}%`;
-        document.getElementById('memoryUsage').textContent = formatBytes(totalMetrics.memory);
-        document.getElementById('networkIO').textContent = `↓${formatBytes(totalMetrics.network.rx)}/s\n↑${formatBytes(totalMetrics.network.tx)}/s`;
-        document.getElementById('diskIO').textContent = `R:${formatBytes(totalMetrics.disk.read)}/s\nW:${formatBytes(totalMetrics.disk.write)}/s`;
+            updateMetricDisplay('cpuUsage', `${totalMetrics.cpu.toFixed(2)}%`);
+            updateMetricDisplay('memoryUsage', formatBytes(totalMetrics.memory));
+            updateMetricDisplay('networkIO', `↓${formatBytes(totalMetrics.network.rx)}/s\n↑${formatBytes(totalMetrics.network.tx)}/s`);
+            updateMetricDisplay('diskIO', `R:${formatBytes(totalMetrics.disk.read)}/s\nW:${formatBytes(totalMetrics.disk.write)}/s`);
+        } catch (error) {
+            console.error('Error updating metrics:', error);
+        }
+    }
+
+    // Update metric display
+    function updateMetricDisplay(elementId, value) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.textContent = value;
+        }
     }
 
     // Start periodic metrics updates
@@ -150,12 +208,38 @@ document.addEventListener('DOMContentLoaded', () => {
         setInterval(updateMetrics, 2000); // Update every 2 seconds
     }
 
-    // Utility function to format bytes
+    // Helper function to format bytes
     function formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
+        if (!bytes || bytes === 0) return '0 B';
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+    }
+
+    // Helper function to get container status class
+    function getContainerStatusClass(state) {
+        if (!state) return 'unknown';
+        state = state.toLowerCase();
+        if (state === 'running') return 'running';
+        if (state === 'exited') return 'stopped';
+        return 'unknown';
+    }
+
+    // Helper function to escape HTML
+    function escapeHtml(unsafe) {
+        if (typeof unsafe !== 'string') return '';
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // Show error message
+    function showError(message) {
+        if (!containersList) return;
+        containersList.innerHTML = `<div class="error-message">${escapeHtml(message)}</div>`;
     }
 }); 
