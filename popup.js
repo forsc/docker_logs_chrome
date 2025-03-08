@@ -1,15 +1,26 @@
 // Docker API client
 class DockerClient {
   constructor() {
-    this.baseUrl = 'http://localhost:2375';
-    this.containers = [];
-    this.metrics = {};
+    // Load settings or use defaults
+    this.loadSettings();
     
     // Log initialization
     console.log('DockerClient initialized with baseUrl:', this.baseUrl);
     
     // Check if Docker API is accessible
     this.checkApiAccess();
+  }
+  
+  // Load settings from storage
+  loadSettings() {
+    chrome.storage.local.get('settings', (result) => {
+      const settings = result.settings || {};
+      this.baseUrl = settings.dockerApiUrl || 'http://localhost:2375';
+      this.containers = [];
+      this.metrics = {};
+      
+      console.log('Settings loaded:', settings);
+    });
   }
 
   // Check if Docker API is accessible
@@ -320,11 +331,92 @@ class UIController {
     this.isDragging = false;
     this.dragOffset = { x: 0, y: 0 };
     
+    // Default settings
+    this.settings = {
+      dockerApiUrl: 'http://localhost:2375',
+      refreshIntervalSeconds: 10,
+      showNotifications: true,
+      theme: 'light'
+    };
+    
+    // Load settings
+    this.loadSettings();
+    
     // Initialize the UI
     this.initUI();
     
     // Log initialization
     console.log('UIController initialized');
+  }
+  
+  // Load settings from storage
+  loadSettings() {
+    chrome.storage.local.get('settings', (result) => {
+      if (result.settings) {
+        this.settings = { ...this.settings, ...result.settings };
+      }
+      console.log('Settings loaded:', this.settings);
+      
+      // Apply theme
+      this.applyTheme(this.settings.theme);
+      
+      // Update UI with settings
+      this.updateSettingsUI();
+    });
+  }
+  
+  // Save settings to storage
+  saveSettings() {
+    chrome.storage.local.set({ settings: this.settings }, () => {
+      console.log('Settings saved:', this.settings);
+      
+      // Update Docker client with new API URL
+      this.dockerClient.baseUrl = this.settings.dockerApiUrl;
+      
+      // Update refresh interval
+      if (this.refreshInterval) {
+        clearInterval(this.refreshInterval);
+      }
+      
+      this.refreshInterval = setInterval(() => {
+        console.log('Auto-refresh triggered');
+        this.refreshData();
+      }, this.settings.refreshIntervalSeconds * 1000);
+      
+      // Apply theme
+      this.applyTheme(this.settings.theme);
+    });
+  }
+  
+  // Apply theme
+  applyTheme(theme) {
+    const root = document.documentElement;
+    
+    if (theme === 'dark') {
+      root.style.setProperty('--background-color', '#1e1e1e');
+      root.style.setProperty('--card-background', '#2d2d2d');
+      root.style.setProperty('--text-color', '#e0e0e0');
+      root.style.setProperty('--border-color', '#444444');
+    } else {
+      // Light theme (default)
+      root.style.setProperty('--background-color', '#f5f7fa');
+      root.style.setProperty('--card-background', '#ffffff');
+      root.style.setProperty('--text-color', '#333333');
+      root.style.setProperty('--border-color', '#e1e4e8');
+    }
+  }
+  
+  // Update settings UI
+  updateSettingsUI() {
+    const apiUrlInput = document.getElementById('docker-api-url');
+    const refreshIntervalInput = document.getElementById('refresh-interval');
+    const showAlertsCheckbox = document.getElementById('show-alerts');
+    const themeSelect = document.getElementById('theme-select');
+    
+    if (apiUrlInput) apiUrlInput.value = this.settings.dockerApiUrl;
+    if (refreshIntervalInput) refreshIntervalInput.value = this.settings.refreshIntervalSeconds;
+    if (showAlertsCheckbox) showAlertsCheckbox.checked = this.settings.showNotifications;
+    if (themeSelect) themeSelect.value = this.settings.theme;
   }
   
   initUI() {
@@ -338,6 +430,51 @@ class UIController {
       console.log('Refresh button clicked');
       this.refreshData();
     });
+    
+    // Settings button
+    const settingsBtn = document.getElementById('settings-btn');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', () => {
+        console.log('Settings button clicked');
+        this.showSettings();
+      });
+    }
+    
+    // Settings back button
+    const settingsBackBtn = document.getElementById('settings-back-btn');
+    if (settingsBackBtn) {
+      settingsBackBtn.addEventListener('click', () => {
+        console.log('Settings back button clicked');
+        this.hideSettings();
+      });
+    }
+    
+    // Save settings button
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    if (saveSettingsBtn) {
+      saveSettingsBtn.addEventListener('click', () => {
+        console.log('Save settings button clicked');
+        this.saveSettingsFromUI();
+      });
+    }
+    
+    // Reset settings button
+    const resetSettingsBtn = document.getElementById('reset-settings-btn');
+    if (resetSettingsBtn) {
+      resetSettingsBtn.addEventListener('click', () => {
+        console.log('Reset settings button clicked');
+        this.resetSettings();
+      });
+    }
+    
+    // Test connection button
+    const testConnectionBtn = document.getElementById('test-connection-btn');
+    if (testConnectionBtn) {
+      testConnectionBtn.addEventListener('click', () => {
+        console.log('Test connection button clicked');
+        this.testConnection();
+      });
+    }
     
     // Back button - add multiple event listeners to ensure it works
     const backBtn = document.getElementById('back-btn');
@@ -368,6 +505,17 @@ class UIController {
       console.error('Back button element not found!');
     }
     
+    // Backup back button
+    const backupBackBtn = document.getElementById('backup-back-btn');
+    if (backupBackBtn) {
+      backupBackBtn.addEventListener('click', (e) => {
+        console.log('Backup back button clicked');
+        e.preventDefault();
+        e.stopPropagation();
+        this.showContainersList();
+      });
+    }
+    
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -395,7 +543,7 @@ class UIController {
     this.refreshInterval = setInterval(() => {
       console.log('Auto-refresh triggered');
       this.refreshData();
-    }, 10000);
+    }, this.settings.refreshIntervalSeconds * 1000);
     
     console.log('UI initialization complete');
   }
@@ -988,6 +1136,12 @@ class UIController {
   
   // Show desktop notification
   showNotification(message) {
+    // Check if notifications are enabled in settings
+    if (!this.settings.showNotifications) {
+      console.log('Notification suppressed (disabled in settings):', message);
+      return;
+    }
+    
     if (Notification.permission === 'granted') {
       new Notification('Docker Container Monitor', {
         body: message,
@@ -1002,6 +1156,131 @@ class UIController {
           });
         }
       });
+    }
+  }
+  
+  // Show settings panel
+  showSettings() {
+    console.log('Showing settings panel');
+    
+    // Update settings UI with current values
+    this.updateSettingsUI();
+    
+    // Hide other views
+    document.getElementById('containers-list').classList.add('hidden');
+    document.getElementById('container-details').classList.add('hidden');
+    
+    // Show settings panel
+    const settingsPanel = document.getElementById('settings-panel');
+    if (settingsPanel) {
+      settingsPanel.classList.remove('hidden');
+      settingsPanel.style.display = 'flex';
+    }
+  }
+  
+  // Hide settings panel
+  hideSettings() {
+    console.log('Hiding settings panel');
+    
+    // Hide settings panel
+    const settingsPanel = document.getElementById('settings-panel');
+    if (settingsPanel) {
+      settingsPanel.classList.add('hidden');
+      settingsPanel.style.display = 'none';
+    }
+    
+    // Show containers list
+    const listView = document.getElementById('containers-list');
+    if (listView) {
+      listView.classList.remove('hidden');
+      listView.style.display = 'block';
+    }
+  }
+  
+  // Save settings from UI
+  saveSettingsFromUI() {
+    const apiUrlInput = document.getElementById('docker-api-url');
+    const refreshIntervalInput = document.getElementById('refresh-interval');
+    const showAlertsCheckbox = document.getElementById('show-alerts');
+    const themeSelect = document.getElementById('theme-select');
+    
+    // Update settings object
+    if (apiUrlInput) this.settings.dockerApiUrl = apiUrlInput.value;
+    if (refreshIntervalInput) this.settings.refreshIntervalSeconds = parseInt(refreshIntervalInput.value);
+    if (showAlertsCheckbox) this.settings.showNotifications = showAlertsCheckbox.checked;
+    if (themeSelect) this.settings.theme = themeSelect.value;
+    
+    // Save settings
+    this.saveSettings();
+    
+    // Show success message
+    this.showAlert('Settings saved successfully');
+    
+    // Hide settings panel
+    this.hideSettings();
+    
+    // Refresh data with new settings
+    this.refreshData();
+  }
+  
+  // Reset settings to default
+  resetSettings() {
+    console.log('Resetting settings to default');
+    
+    // Reset to default values
+    this.settings = {
+      dockerApiUrl: 'http://localhost:2375',
+      refreshIntervalSeconds: 10,
+      showNotifications: true,
+      theme: 'light'
+    };
+    
+    // Update UI
+    this.updateSettingsUI();
+    
+    // Save settings
+    this.saveSettings();
+    
+    // Show success message
+    this.showAlert('Settings reset to default');
+  }
+  
+  // Test Docker API connection
+  async testConnection() {
+    const apiUrlInput = document.getElementById('docker-api-url');
+    const connectionStatus = document.getElementById('connection-status');
+    
+    if (!apiUrlInput || !connectionStatus) return;
+    
+    const apiUrl = apiUrlInput.value;
+    connectionStatus.textContent = 'Testing connection...';
+    connectionStatus.className = '';
+    
+    try {
+      console.log(`Testing connection to ${apiUrl}`);
+      
+      const response = await fetch(`${apiUrl}/version`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      if (response.ok) {
+        const version = await response.json();
+        connectionStatus.textContent = `Connected! Docker ${version.Version}`;
+        connectionStatus.className = 'connection-success';
+        console.log('Connection test successful:', version);
+      } else {
+        connectionStatus.textContent = `Error: ${response.status} ${response.statusText}`;
+        connectionStatus.className = 'connection-error';
+        console.error('Connection test failed:', response.status, response.statusText);
+      }
+    } catch (error) {
+      connectionStatus.textContent = `Error: ${error.message}`;
+      connectionStatus.className = 'connection-error';
+      console.error('Connection test error:', error);
     }
   }
 }

@@ -1,16 +1,47 @@
 // Docker API client for background monitoring
 class DockerMonitor {
   constructor() {
-    this.baseUrl = 'http://localhost:2375';
+    // Default settings
+    this.settings = {
+      dockerApiUrl: 'http://localhost:2375',
+      refreshIntervalSeconds: 30,
+      showNotifications: true,
+      theme: 'light'
+    };
+    
+    // Load settings
+    this.loadSettings();
+    
     this.containers = [];
     this.containerStates = {};
-    this.checkInterval = 30000; // Check every 30 seconds
     this.isMonitoring = false;
+  }
+  
+  // Load settings from storage
+  loadSettings() {
+    chrome.storage.local.get('settings', (result) => {
+      if (result.settings) {
+        this.settings = { ...this.settings, ...result.settings };
+      }
+      console.log('Background monitor settings loaded:', this.settings);
+      
+      // Update baseUrl from settings
+      this.baseUrl = this.settings.dockerApiUrl;
+      
+      // Update check interval
+      this.checkInterval = this.settings.refreshIntervalSeconds * 1000;
+      
+      // Start monitoring with new settings
+      this.startMonitoring();
+    });
   }
 
   // Start monitoring
   startMonitoring() {
-    if (this.isMonitoring) return;
+    if (this.isMonitoring) {
+      // If already monitoring, stop first to reset with new settings
+      this.stopMonitoring();
+    }
     
     this.isMonitoring = true;
     this.checkContainers();
@@ -20,7 +51,7 @@ class DockerMonitor {
       this.checkContainers();
     }, this.checkInterval);
     
-    console.log('Docker container monitoring started');
+    console.log(`Docker container monitoring started with interval: ${this.checkInterval}ms`);
   }
 
   // Stop monitoring
@@ -107,6 +138,12 @@ class DockerMonitor {
 
   // Send an alert notification
   sendAlert(message) {
+    // Check if notifications are enabled in settings
+    if (!this.settings.showNotifications) {
+      console.log('Notification suppressed (disabled in settings):', message);
+      return;
+    }
+    
     // Send notification
     chrome.notifications.create({
       type: 'basic',
@@ -139,8 +176,13 @@ class DockerMonitor {
 // Initialize the monitor
 const dockerMonitor = new DockerMonitor();
 
-// Start monitoring when the extension is loaded
-dockerMonitor.startMonitoring();
+// Listen for settings changes
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local' && changes.settings) {
+    console.log('Settings changed, reloading monitor...');
+    dockerMonitor.loadSettings();
+  }
+});
 
 // Listen for alarm events
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -178,6 +220,22 @@ chrome.runtime.onInstalled.addListener((details) => {
           } else {
             console.log('Notification permission denied');
           }
+        });
+      }
+    });
+    
+    // Initialize default settings
+    chrome.storage.local.get('settings', (result) => {
+      if (!result.settings) {
+        const defaultSettings = {
+          dockerApiUrl: 'http://localhost:2375',
+          refreshIntervalSeconds: 30,
+          showNotifications: true,
+          theme: 'light'
+        };
+        
+        chrome.storage.local.set({ settings: defaultSettings }, () => {
+          console.log('Default settings initialized');
         });
       }
     });
