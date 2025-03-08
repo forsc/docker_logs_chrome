@@ -5,50 +5,60 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Docker Monitor</h1>
-            <div class="search-container">
-                <input type="text" id="searchInput" placeholder="Search logs...">
-                <button id="searchBtn">Search</button>
+    <div class="window">
+        <div class="titlebar" id="titlebar">
+            <div class="title">Docker Monitor</div>
+            <div class="window-controls">
+                <button id="pinWindow" class="pin-button" title="Pin window">📌</button>
+                <button id="refreshAll" class="refresh-button" title="Refresh all">🔄</button>
             </div>
-        </header>
-
-        <div class="containers-section">
-            <h2>Containers</h2>
-            <div id="containersList" class="containers-list"></div>
         </div>
-
-        <div class="logs-section">
-            <h2>Container Logs</h2>
-            <div class="logs-header">
-                <select id="containerSelect">
-                    <option value="">Select Container</option>
-                </select>
-                <button id="refreshLogs">Refresh</button>
+        <div class="container">
+            <div class="metrics-section">
+                <div id="metricsGrid" class="metrics-grid">
+                    <div class="metric-card">
+                        <h3>CPU Usage</h3>
+                        <div id="cpuUsage" class="metric-value">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Memory Usage</h3>
+                        <div id="memoryUsage" class="metric-value">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Network I/O</h3>
+                        <div id="networkIO" class="metric-value">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Disk I/O</h3>
+                        <div id="diskIO" class="metric-value">-</div>
+                    </div>
+                </div>
             </div>
-            <div id="logsOutput" class="logs-output"></div>
-        </div>
 
-        <div class="metrics-section">
-            <h2>System Metrics</h2>
-            <div id="metricsGrid" class="metrics-grid">
-                <div class="metric-card">
-                    <h3>CPU Usage</h3>
-                    <div id="cpuUsage">-</div>
+            <div class="containers-section">
+                <div class="section-header">
+                    <h2>Containers</h2>
+                    <div class="loading-spinner" id="containersLoading"></div>
                 </div>
-                <div class="metric-card">
-                    <h3>Memory Usage</h3>
-                    <div id="memoryUsage">-</div>
+                <div id="containersList" class="containers-list"></div>
+            </div>
+
+            <div class="logs-section">
+                <div class="section-header">
+                    <h2>Container Logs</h2>
+                    <div class="loading-spinner" id="logsLoading"></div>
                 </div>
-                <div class="metric-card">
-                    <h3>Network I/O</h3>
-                    <div id="networkIO">-</div>
+                <div class="logs-controls">
+                    <select id="containerSelect">
+                        <option value="">Select Container</option>
+                    </select>
+                    <div class="search-container">
+                        <input type="text" id="searchInput" placeholder="Search logs...">
+                        <button id="searchBtn">Search</button>
+                    </div>
+                    <button id="refreshLogs">Refresh</button>
                 </div>
-                <div class="metric-card">
-                    <h3>Disk I/O</h3>
-                    <div id="diskIO">-</div>
-                </div>
+                <div id="logsOutput" class="logs-output"></div>
             </div>
         </div>
     </div>

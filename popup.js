@@ -11,14 +11,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let containers = [];
 
     // Load initial data
-    loadContainers();
+    debouncedLoadContainers();
     startMetricsUpdates();
 
     // Event listeners
     containerSelect.addEventListener('change', (e) => {
         selectedContainerId = e.target.value;
         if (selectedContainerId) {
-            loadContainerLogs(selectedContainerId);
+            debouncedLoadContainerLogs(selectedContainerId);
         }
     });
 
@@ -29,10 +29,98 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     refreshLogsBtn.addEventListener('click', () => {
-        if (selectedContainerId) {
-            loadContainerLogs(selectedContainerId);
-        }
+        debouncedLoadContainers();
     });
+
+    // Draggable window functionality
+    let isDragging = false;
+    let currentX;
+    let currentY;
+    let initialX;
+    let initialY;
+    let xOffset = 0;
+    let yOffset = 0;
+
+    function dragStart(e) {
+        if (e.target.closest('.titlebar') && !e.target.closest('.window-controls')) {
+            initialX = e.clientX - xOffset;
+            initialY = e.clientY - yOffset;
+            isDragging = true;
+        }
+    }
+
+    function dragEnd() {
+        initialX = currentX;
+        initialY = currentY;
+        isDragging = false;
+    }
+
+    function drag(e) {
+        if (isDragging) {
+            e.preventDefault();
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            xOffset = currentX;
+            yOffset = currentY;
+            setTranslate(currentX, currentY, document.querySelector('.window'));
+        }
+    }
+
+    function setTranslate(xPos, yPos, el) {
+        el.style.transform = `translate(${xPos}px, ${yPos}px)`;
+    }
+
+    // Debounce function for performance
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // Enhance loadContainers with debouncing and loading indicator
+    const debouncedLoadContainers = debounce(async () => {
+        const loadingSpinner = document.querySelector('.loading-spinner');
+        if (loadingSpinner) loadingSpinner.classList.add('active');
+        
+        try {
+            const containers = await chrome.runtime.sendMessage({ action: 'getContainers' });
+            updateContainersList(containers);
+        } catch (error) {
+            showError('Failed to load containers: ' + error.message);
+        } finally {
+            if (loadingSpinner) loadingSpinner.classList.remove('active');
+        }
+    }, 300);
+
+    // Enhance loadContainerLogs with debouncing and loading indicator
+    const debouncedLoadContainerLogs = debounce(async (containerId) => {
+        const logsLoadingSpinner = document.querySelector('.logs-loading-spinner');
+        if (logsLoadingSpinner) logsLoadingSpinner.classList.add('active');
+        
+        try {
+            const logs = await chrome.runtime.sendMessage({
+                action: 'getContainerLogs',
+                containerId: containerId
+            });
+            displayLogs(logs);
+        } catch (error) {
+            showError('Failed to load logs: ' + error.message);
+        } finally {
+            if (logsLoadingSpinner) logsLoadingSpinner.classList.remove('active');
+        }
+    }, 300);
+
+    // Initialize draggable functionality
+    document.addEventListener('mousedown', dragStart);
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('mouseup', dragEnd);
+    document.addEventListener('mouseleave', dragEnd);
 
     // Load containers list
     async function loadContainers() {
@@ -241,5 +329,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function showError(message) {
         if (!containersList) return;
         containersList.innerHTML = `<div class="error-message">${escapeHtml(message)}</div>`;
+    }
+
+    // Add pin button functionality
+    const pinButton = document.querySelector('#pin-button');
+    if (pinButton) {
+        pinButton.addEventListener('click', () => {
+            const window = document.querySelector('.window');
+            window.classList.toggle('pinned');
+            pinButton.textContent = window.classList.contains('pinned') ? '📌' : '📍';
+        });
     }
 }); 

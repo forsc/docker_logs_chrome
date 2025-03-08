@@ -15,6 +15,22 @@ if (!isWindows) {
 let ACTIVE_DOCKER_API = null;
 let connectionRetryCount = 0;
 const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000; // 2 seconds between retries
+
+// Helper function to add CORS headers
+function addCorsHeaders(options = {}) {
+    return {
+        ...options,
+        headers: {
+            ...options.headers,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Origin': chrome.runtime.getURL(''),
+            'Cache-Control': 'no-cache'
+        },
+        mode: 'cors'
+    };
+}
 
 // Helper function to handle Unix socket requests
 async function unixSocketFetch(path, options = {}) {
@@ -67,29 +83,11 @@ async function dockerFetch(path, options = {}) {
     try {
         console.log(`Making request to ${ACTIVE_DOCKER_API}${path}`);
         
-        // Add proper headers for Docker API
-        const defaultHeaders = {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        };
-
-        const finalOptions = {
-            ...options,
-            headers: {
-                ...defaultHeaders,
-                ...options.headers
-            }
-        };
-
-        let response;
-        if (ACTIVE_DOCKER_API.startsWith('unix://')) {
-            response = await unixSocketFetch(path, finalOptions);
-        } else {
-            response = await fetch(`${ACTIVE_DOCKER_API}${path}`, finalOptions);
-            console.log('TCP response:', response.status, response.statusText);
-        }
-
-        // Check if the response is ok
+        const finalOptions = addCorsHeaders(options);
+        const response = await fetch(`${ACTIVE_DOCKER_API}${path}`, finalOptions);
+        
+        console.log('Response status:', response.status);
+        
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -97,14 +95,20 @@ async function dockerFetch(path, options = {}) {
         return response;
     } catch (error) {
         console.error('Docker API request failed:', error.message);
-        console.error('Full error:', error);
         
-        // Only reset the API endpoint if it's a connection error
+        // Reset API endpoint and retry on connection errors
         if (error.message.includes('Failed to fetch') || 
             error.message.includes('NetworkError') ||
             error.message.includes('ECONNREFUSED')) {
             console.log('Connection error detected, resetting API endpoint');
             ACTIVE_DOCKER_API = null;
+            
+            // Retry the request if we haven't exceeded the retry limit
+            if (connectionRetryCount < MAX_RETRIES) {
+                console.log(`Retrying request (attempt ${connectionRetryCount + 1} of ${MAX_RETRIES})`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                return dockerFetch(path, options);
+            }
         }
         
         throw error;
@@ -113,7 +117,7 @@ async function dockerFetch(path, options = {}) {
 
 // Initialize alarm for periodic checks
 chrome.alarms.create('checkDockerStatus', {
-    periodInMinutes: 0.5 // Check every 30 seconds
+    periodInMinutes: 0.25 // Check every 15 seconds
 });
 
 // Test Docker API endpoints and set the active one
@@ -134,23 +138,10 @@ async function findActiveDockerEndpoint() {
     for (const endpoint of DOCKER_API_ENDPOINTS) {
         try {
             console.log(`Attempting to connect to Docker at ${endpoint}...`);
-            let response;
             
-            if (endpoint.startsWith('unix://')) {
-                if (isWindows) {
-                    console.log('Skipping Unix socket on Windows');
-                    continue;
-                }
-                response = await unixSocketFetch('/version');
-            } else {
-                response = await fetch(`${endpoint}/version`, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json'
-                    }
-                });
-            }
-
+            const options = addCorsHeaders();
+            const response = await fetch(`${endpoint}/version`, options);
+            
             if (!response.ok) {
                 console.log(`Endpoint ${endpoint} returned status ${response.status}`);
                 continue;
@@ -158,44 +149,36 @@ async function findActiveDockerEndpoint() {
 
             const version = await response.json();
             console.log('Docker version info:', version);
-            console.log(`Successfully connected to Docker API at ${endpoint}`);
             
             // Test container list endpoint
-            try {
-                const containerResponse = await fetch(`${endpoint}/containers/json?all=1`, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                if (!containerResponse.ok) {
-                    console.error(`Container endpoint test failed for ${endpoint}`);
-                    continue;
-                }
-                
-                const containers = await containerResponse.json();
-                console.log(`Container endpoint test successful. Found ${containers.length} containers`);
-                
-                ACTIVE_DOCKER_API = endpoint;
-                connectionRetryCount = 0; // Reset counter on successful connection
-                return true;
-            } catch (containerError) {
-                console.error(`Container endpoint test failed for ${endpoint}:`, containerError);
+            const containerResponse = await fetch(`${endpoint}/containers/json?all=1`, options);
+            
+            if (!containerResponse.ok) {
+                console.error(`Container endpoint test failed for ${endpoint}`);
                 continue;
             }
+            
+            const containers = await containerResponse.json();
+            console.log(`Container endpoint test successful. Found ${containers.length} containers`);
+            
+            ACTIVE_DOCKER_API = endpoint;
+            connectionRetryCount = 0; // Reset counter on successful connection
+            return true;
         } catch (error) {
             console.log(`Failed to connect to ${endpoint}:`, error.message);
-            if (endpoint.startsWith('unix://')) {
-                console.log('Unix socket connection failed. If on Windows, this is expected.');
-            } else {
-                console.log('TCP connection failed. Check if Docker API is exposed on port 2375');
-            }
+            console.log('Will try next endpoint or retry...');
         }
     }
 
     connectionRetryCount++;
     console.error(`Could not connect to Docker API. Attempt ${connectionRetryCount} of ${MAX_RETRIES}`);
+    
+    // Add delay between retries
+    if (connectionRetryCount < MAX_RETRIES) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        return findActiveDockerEndpoint();
+    }
+    
     return false;
 }
 
@@ -213,29 +196,116 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     }
 });
 
-// Check container health and send notifications if needed
+// Enhanced container health check function
 async function checkContainerHealth() {
     try {
         const containers = await fetchContainers();
         containers.forEach(container => {
-            if (container.State === 'exited' || (container.State === 'running' && container.Status.includes('unhealthy'))) {
-                showNotification(container);
+            // Check various failure conditions
+            const isUnhealthy = 
+                container.State === 'exited' || 
+                container.State === 'dead' ||
+                container.State === 'restarting' ||
+                (container.State === 'running' && container.Status.includes('unhealthy')) ||
+                container.Status.includes('(Restarting)') ||
+                (container.State === 'running' && container.RestartCount > 3);
+
+            if (isUnhealthy) {
+                const reason = getUnhealthyReason(container);
+                showContainerAlert(container, reason);
             }
         });
     } catch (error) {
         console.error('Error checking container health:', error);
+        showError('Container Health Check Failed', 'Unable to monitor container health: ' + error.message);
     }
 }
 
-// Show notification for container issues
-function showNotification(container) {
-    chrome.notifications.create(`container-${container.Id}`, {
+// Get the reason for unhealthy state
+function getUnhealthyReason(container) {
+    if (container.State === 'exited') {
+        const exitCode = container.Status.match(/\((\d+)\)/)?.[1] || 'unknown';
+        return `Container exited with code ${exitCode}`;
+    }
+    if (container.State === 'dead') return 'Container is in dead state';
+    if (container.State === 'restarting') return 'Container is stuck in restarting loop';
+    if (container.Status.includes('unhealthy')) return 'Container health check failed';
+    if (container.Status.includes('(Restarting)')) return 'Container is repeatedly restarting';
+    if (container.RestartCount > 3) return `Container has restarted ${container.RestartCount} times`;
+    return 'Container is in an unhealthy state';
+}
+
+// Enhanced notification function with different types of alerts
+function showContainerAlert(container, reason) {
+    const containerName = container.Names[0].replace('/', '');
+    const notificationId = `container-${container.Id}-${Date.now()}`;
+
+    // Create different notification types based on severity
+    const notificationOptions = {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: 'Docker Container Alert',
-        message: `Container ${container.Names[0].replace('/', '')} is ${container.State}!`,
+        message: `${containerName}: ${reason}`,
+        priority: 2,
+        buttons: [
+            { title: 'View Logs' },
+            { title: 'Restart Container' }
+        ]
+    };
+
+    // Add different icons based on state
+    if (container.State === 'dead' || container.State === 'exited') {
+        notificationOptions.iconUrl = 'icons/error128.png';
+    } else if (container.State === 'restarting') {
+        notificationOptions.iconUrl = 'icons/warning128.png';
+    }
+
+    chrome.notifications.create(notificationId, notificationOptions);
+}
+
+// Show error notifications
+function showError(title, message) {
+    chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/error128.png',
+        title: title,
+        message: message,
         priority: 2
     });
+}
+
+// Handle notification button clicks
+chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+    const containerId = notificationId.split('-')[1];
+    
+    if (buttonIndex === 0) {
+        // View logs
+        chrome.runtime.sendMessage({
+            action: 'viewLogs',
+            containerId: containerId
+        });
+    } else if (buttonIndex === 1) {
+        // Restart container
+        restartContainer(containerId);
+    }
+});
+
+// Function to restart a container
+async function restartContainer(containerId) {
+    try {
+        await dockerFetch(`/containers/${containerId}/restart`, {
+            method: 'POST'
+        });
+        
+        showContainerAlert({
+            Id: containerId,
+            Names: ['Container'],
+            State: 'restarting'
+        }, 'Container restart initiated');
+    } catch (error) {
+        console.error('Error restarting container:', error);
+        showError('Restart Failed', `Failed to restart container: ${error.message}`);
+    }
 }
 
 // Listen for messages from popup
