@@ -192,6 +192,7 @@ input[type="text"] {
   padding: 15px;
   display: flex;
   flex-direction: column;
+  overflow: auto;
 }
 
 .details-header {
@@ -199,6 +200,32 @@ input[type="text"] {
   align-items: center;
   gap: 15px;
   margin-bottom: 20px;
+}
+
+#back-btn {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 1rem;
+  z-index: 20;
+  position: relative;
+  min-width: 80px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#back-btn:hover {
+  background-color: #1a7ac5;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+#back-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .tabs {
@@ -318,7 +345,10 @@ input[type="text"] {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 select {

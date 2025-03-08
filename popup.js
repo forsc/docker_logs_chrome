@@ -339,10 +339,34 @@ class UIController {
       this.refreshData();
     });
     
-    document.getElementById('back-btn').addEventListener('click', () => {
-      console.log('Back button clicked');
-      this.showContainersList();
-    });
+    // Back button - add multiple event listeners to ensure it works
+    const backBtn = document.getElementById('back-btn');
+    if (backBtn) {
+      // Regular click event
+      backBtn.addEventListener('click', (e) => {
+        console.log('Back button clicked');
+        e.preventDefault();
+        e.stopPropagation();
+        this.showContainersList();
+      });
+      
+      // Mousedown event (more immediate)
+      backBtn.addEventListener('mousedown', (e) => {
+        console.log('Back button mousedown');
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      
+      // Mouseup event
+      backBtn.addEventListener('mouseup', (e) => {
+        console.log('Back button mouseup');
+        e.preventDefault();
+        e.stopPropagation();
+        this.showContainersList();
+      });
+    } else {
+      console.error('Back button element not found!');
+    }
     
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -586,21 +610,47 @@ class UIController {
   
   // Load detailed information for a container
   async loadContainerDetails(containerId) {
+    console.log(`Loading details for container: ${containerId}`);
+    
+    // Store the selected container ID
     this.selectedContainerId = containerId;
     
     try {
       // Get container info
       const info = await this.dockerClient.getContainerInfo(containerId);
+      console.log('Container info loaded successfully');
       
       // Update UI with container name (with fallback)
       const containerName = info.Name ? info.Name.replace(/^\//, '') : 
                            (info.Config && info.Config.Hostname) ? info.Config.Hostname :
                            containerId.substring(0, 12);
-      document.getElementById('container-name').textContent = containerName;
       
-      // Show container details panel
-      document.getElementById('containers-list').classList.add('hidden');
-      document.getElementById('container-details').classList.remove('hidden');
+      const nameElement = document.getElementById('container-name');
+      if (nameElement) {
+        nameElement.textContent = containerName;
+        console.log(`Container name set to: ${containerName}`);
+      }
+      
+      // Direct DOM manipulation to ensure views are properly toggled
+      try {
+        // Force hide containers list view using direct style manipulation
+        const listView = document.getElementById('containers-list');
+        if (listView) {
+          listView.classList.add('hidden');
+          listView.style.display = 'none';
+          console.log('Containers list view hidden (direct style)');
+        }
+        
+        // Force show container details panel using direct style manipulation
+        const detailsView = document.getElementById('container-details');
+        if (detailsView) {
+          detailsView.classList.remove('hidden');
+          detailsView.style.display = 'flex';
+          console.log('Container details view shown (direct style)');
+        }
+      } catch (viewError) {
+        console.error('Error toggling views:', viewError);
+      }
       
       // Load container info tab
       this.loadContainerInfo(info);
@@ -609,7 +659,7 @@ class UIController {
       this.loadContainerLogs(containerId);
       
       // Load metrics for this container if it's running
-      if (info.State.Running) {
+      if (info.State && info.State.Running) {
         await this.loadContainerMetrics(containerId);
       }
       
@@ -618,12 +668,16 @@ class UIController {
       
       // Switch to metrics tab by default
       this.switchTab('metrics');
+      
+      console.log('Container details loaded successfully');
+      return true;
     } catch (error) {
       console.error(`Error loading details for ${containerId}:`, error);
       this.showAlert(`Error loading container details: ${error.message}`);
       
       // If there's an error, go back to the container list
       this.showContainersList();
+      return false;
     }
   }
   
@@ -796,31 +850,93 @@ class UIController {
   
   // Switch between tabs in container details
   switchTab(tabName) {
-    // Hide all tabs
-    document.querySelectorAll('.tab-content').forEach(tab => {
-      tab.classList.remove('active');
-    });
+    console.log(`Switching to tab: ${tabName}`);
     
-    // Deactivate all tab buttons
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.classList.remove('active');
-    });
-    
-    // Show selected tab
-    document.getElementById(`${tabName}-tab`).classList.add('active');
-    
-    // Activate selected tab button
-    document.querySelector(`.tab-btn[data-tab="${tabName}"]`).classList.add('active');
+    try {
+      // Hide all tabs
+      const tabContents = document.querySelectorAll('.tab-content');
+      if (tabContents.length > 0) {
+        tabContents.forEach(tab => {
+          tab.classList.remove('active');
+        });
+        console.log('All tabs hidden');
+      } else {
+        console.warn('No tab content elements found');
+      }
+      
+      // Deactivate all tab buttons
+      const tabButtons = document.querySelectorAll('.tab-btn');
+      if (tabButtons.length > 0) {
+        tabButtons.forEach(btn => {
+          btn.classList.remove('active');
+        });
+        console.log('All tab buttons deactivated');
+      } else {
+        console.warn('No tab button elements found');
+      }
+      
+      // Show selected tab
+      const selectedTab = document.getElementById(`${tabName}-tab`);
+      if (selectedTab) {
+        selectedTab.classList.add('active');
+        console.log(`Tab ${tabName} activated`);
+      } else {
+        console.warn(`Tab element ${tabName}-tab not found`);
+      }
+      
+      // Activate selected tab button
+      const selectedButton = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+      if (selectedButton) {
+        selectedButton.classList.add('active');
+        console.log(`Tab button for ${tabName} activated`);
+      } else {
+        console.warn(`Tab button for ${tabName} not found`);
+      }
+    } catch (error) {
+      console.error('Error switching tabs:', error);
+    }
   }
   
   // Show container list (go back from details)
   showContainersList() {
-    this.selectedContainerId = null;
-    document.getElementById('container-details').classList.add('hidden');
-    document.getElementById('containers-list').classList.remove('hidden');
+    console.log('Showing containers list view (back button pressed)');
     
-    // Refresh the data to ensure the container list is up-to-date
-    this.refreshData();
+    // Clear the selected container ID
+    this.selectedContainerId = null;
+    
+    // Reset container name display
+    document.getElementById('container-name').textContent = 'Container Name';
+    
+    // Direct DOM manipulation to ensure views are properly toggled
+    try {
+      // Force hide container details view using direct style manipulation
+      const detailsView = document.getElementById('container-details');
+      if (detailsView) {
+        detailsView.classList.add('hidden');
+        detailsView.style.display = 'none';
+        console.log('Container details view hidden (direct style)');
+      }
+      
+      // Force show containers list view using direct style manipulation
+      const listView = document.getElementById('containers-list');
+      if (listView) {
+        listView.classList.remove('hidden');
+        listView.style.display = 'block';
+        console.log('Containers list view shown (direct style)');
+      }
+      
+      // Force a complete refresh of the data
+      setTimeout(() => {
+        console.log('Refreshing data after back button press');
+        this.refreshData();
+      }, 100);
+    } catch (error) {
+      console.error('Error in showContainersList:', error);
+      
+      // Fallback approach - reload the extension
+      console.log('Using fallback approach to return to list view');
+      window.location.reload();
+    }
   }
   
   // Check container health and show alerts
