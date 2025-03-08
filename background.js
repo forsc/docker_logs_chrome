@@ -1,10 +1,37 @@
-const DOCKER_API = 'http://localhost:2375';
-const CHECK_INTERVAL = 30000; // 30 seconds
+// Try different Docker API endpoints
+const DOCKER_API_ENDPOINTS = [
+    'http://localhost:2375',
+    'http://127.0.0.1:2375',
+    'npipe:////.//pipe//docker_engine' // Windows named pipe
+];
+
+let ACTIVE_DOCKER_API = null;
 
 // Initialize alarm for periodic checks
 chrome.alarms.create('checkDockerStatus', {
     periodInMinutes: 0.5 // Check every 30 seconds
 });
+
+// Test Docker API endpoints and set the active one
+async function findActiveDockerEndpoint() {
+    for (const endpoint of DOCKER_API_ENDPOINTS) {
+        try {
+            const response = await fetch(`${endpoint}/containers/json?all=1`);
+            if (response.ok) {
+                ACTIVE_DOCKER_API = endpoint;
+                console.log(`Connected to Docker API at: ${endpoint}`);
+                return true;
+            }
+        } catch (error) {
+            console.log(`Failed to connect to ${endpoint}:`, error);
+        }
+    }
+    console.error('Could not connect to any Docker API endpoint');
+    return false;
+}
+
+// Initialize connection
+findActiveDockerEndpoint();
 
 // Listen for alarm
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -15,6 +42,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Check container health and send notifications if needed
 async function checkContainerHealth() {
+    if (!ACTIVE_DOCKER_API) {
+        await findActiveDockerEndpoint();
+        if (!ACTIVE_DOCKER_API) return;
+    }
+
     try {
         const containers = await fetchContainers();
         containers.forEach(container => {
@@ -24,6 +56,8 @@ async function checkContainerHealth() {
         });
     } catch (error) {
         console.error('Error checking container health:', error);
+        // If we get an error, try to find a working endpoint again
+        ACTIVE_DOCKER_API = null;
     }
 }
 
@@ -58,8 +92,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Fetch container list with stats
 async function fetchContainers() {
+    if (!ACTIVE_DOCKER_API) {
+        await findActiveDockerEndpoint();
+        if (!ACTIVE_DOCKER_API) return [];
+    }
+
     try {
-        const response = await fetch(`${DOCKER_API}/containers/json?all=1`);
+        const response = await fetch(`${ACTIVE_DOCKER_API}/containers/json?all=1`);
         const containers = await response.json();
         
         // Fetch stats for each container
@@ -81,15 +120,21 @@ async function fetchContainers() {
         return containersWithStats;
     } catch (error) {
         console.error('Error fetching containers:', error);
+        ACTIVE_DOCKER_API = null; // Reset API endpoint if we get an error
         return [];
     }
 }
 
 // Fetch container logs
 async function fetchContainerLogs(containerId) {
+    if (!ACTIVE_DOCKER_API) {
+        await findActiveDockerEndpoint();
+        if (!ACTIVE_DOCKER_API) return { error: 'Docker API not available' };
+    }
+
     try {
         const response = await fetch(
-            `${DOCKER_API}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=1&tail=100`
+            `${ACTIVE_DOCKER_API}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=1&tail=100`
         );
         const text = await response.text();
         
@@ -112,14 +157,20 @@ async function fetchContainerLogs(containerId) {
         return { logs };
     } catch (error) {
         console.error('Error fetching container logs:', error);
+        ACTIVE_DOCKER_API = null;
         return { error: 'Failed to fetch logs' };
     }
 }
 
 // Fetch container stats
 async function fetchContainerStats(containerId) {
+    if (!ACTIVE_DOCKER_API) {
+        await findActiveDockerEndpoint();
+        if (!ACTIVE_DOCKER_API) return null;
+    }
+
     try {
-        const response = await fetch(`${DOCKER_API}/containers/${containerId}/stats?stream=false`);
+        const response = await fetch(`${ACTIVE_DOCKER_API}/containers/${containerId}/stats?stream=false`);
         const stats = await response.json();
 
         return {
@@ -136,15 +187,21 @@ async function fetchContainerStats(containerId) {
         };
     } catch (error) {
         console.error('Error fetching container stats:', error);
+        ACTIVE_DOCKER_API = null;
         return null;
     }
 }
 
 // Search container logs
 async function searchContainerLogs(containerId, searchQuery) {
+    if (!ACTIVE_DOCKER_API) {
+        await findActiveDockerEndpoint();
+        if (!ACTIVE_DOCKER_API) return { error: 'Docker API not available' };
+    }
+
     try {
         const response = await fetch(
-            `${DOCKER_API}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=1&tail=1000`
+            `${ACTIVE_DOCKER_API}/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=1&tail=1000`
         );
         const text = await response.text();
         
@@ -169,6 +226,7 @@ async function searchContainerLogs(containerId, searchQuery) {
         return { logs };
     } catch (error) {
         console.error('Error searching logs:', error);
+        ACTIVE_DOCKER_API = null;
         return { error: 'Failed to search logs' };
     }
 }
