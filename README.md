@@ -1,6 +1,6 @@
 # Docker Monitor Chrome Extension
 
-A Chrome extension for monitoring Docker containers, their logs, system usage, and health status. Get real-time updates and notifications about your Docker containers directly in your browser.
+A Chrome extension for monitoring Docker containers, their logs, system usage, and health status. Get real-time updates and notifications about your Docker containers directly in your browser. THIS IS DUE HOW HORRIBLE DOCKER LOGS READING IS! :( 
 
 ## Features
 
