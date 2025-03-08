@@ -235,39 +235,29 @@ function getUnhealthyReason(container) {
     return 'Container is in an unhealthy state';
 }
 
-// Enhanced notification function with different types of alerts
+// Enhanced notification function with simplified format
 function showContainerAlert(container, reason) {
     const containerName = container.Names[0].replace('/', '');
     const notificationId = `container-${container.Id}-${Date.now()}`;
 
-    // Create different notification types based on severity
-    const notificationOptions = {
+    chrome.notifications.create(notificationId, {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: 'Docker Container Alert',
+        title: 'Container Alert',
         message: `${containerName}: ${reason}`,
         priority: 2,
         buttons: [
             { title: 'View Logs' },
             { title: 'Restart Container' }
         ]
-    };
-
-    // Add different icons based on state
-    if (container.State === 'dead' || container.State === 'exited') {
-        notificationOptions.iconUrl = 'icons/error128.png';
-    } else if (container.State === 'restarting') {
-        notificationOptions.iconUrl = 'icons/warning128.png';
-    }
-
-    chrome.notifications.create(notificationId, notificationOptions);
+    });
 }
 
 // Show error notifications
 function showError(title, message) {
     chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/error128.png',
+        iconUrl: 'icons/icon128.png',
         title: title,
         message: message,
         priority: 2
