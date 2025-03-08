@@ -337,4 +337,53 @@ select {
   box-shadow: var(--shadow);
   color: var(--danger-color);
   font-weight: bold;
+}
+
+.error-message p {
+  margin-bottom: 10px;
+}
+
+.loading {
+  background-color: var(--card-background);
+  padding: 15px;
+  margin: 15px 0;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  text-align: center;
+  position: relative;
+  padding-left: 30px;
+}
+
+.loading:before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--primary-color);
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: translateY(-50%) rotate(0deg); }
+  100% { transform: translateY(-50%) rotate(360deg); }
+}
+
+.retry-btn {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 10px;
+  font-weight: normal;
+}
+
+.retry-btn:hover {
+  background-color: #1a7ac5;
 } 

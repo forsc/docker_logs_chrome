@@ -4,14 +4,134 @@ class DockerClient {
     this.baseUrl = 'http://localhost:2375';
     this.containers = [];
     this.metrics = {};
+    
+    // Log initialization
+    console.log('DockerClient initialized with baseUrl:', this.baseUrl);
+    
+    // Check if Docker API is accessible
+    this.checkApiAccess();
+  }
+
+  // Check if Docker API is accessible
+  async checkApiAccess() {
+    try {
+      console.log('Checking Docker API access...');
+      
+      // Try both localhost and 127.0.0.1
+      let response = null;
+      let accessUrl = '';
+      
+      try {
+        accessUrl = `http://localhost:2375/version?t=${Date.now()}`;
+        console.log('Trying:', accessUrl);
+        response = await fetch(accessUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          },
+          // Short timeout to quickly check if API is accessible
+          signal: AbortSignal.timeout(2000)
+        });
+        
+        if (response.ok) {
+          this.baseUrl = 'http://localhost:2375';
+          console.log('Docker API accessible at localhost:2375');
+        }
+      } catch (localhostError) {
+        console.log('Could not access Docker API at localhost:2375:', localhostError);
+        
+        try {
+          accessUrl = `http://127.0.0.1:2375/version?t=${Date.now()}`;
+          console.log('Trying:', accessUrl);
+          response = await fetch(accessUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json'
+            },
+            // Short timeout to quickly check if API is accessible
+            signal: AbortSignal.timeout(2000)
+          });
+          
+          if (response.ok) {
+            this.baseUrl = 'http://127.0.0.1:2375';
+            console.log('Docker API accessible at 127.0.0.1:2375');
+          }
+        } catch (ipError) {
+          console.log('Could not access Docker API at 127.0.0.1:2375:', ipError);
+          throw new Error('Docker API not accessible at localhost:2375 or 127.0.0.1:2375');
+        }
+      }
+      
+      if (response && response.ok) {
+        const version = await response.json();
+        console.log('Docker API version:', version);
+        return true;
+      } else {
+        throw new Error(`HTTP error! status: ${response ? response.status : 'unknown'}`);
+      }
+    } catch (error) {
+      console.error('Error checking Docker API access:', error);
+      
+      // Show error message in the UI
+      const containersGrid = document.getElementById('containers-grid');
+      if (containersGrid) {
+        containersGrid.innerHTML = `
+          <div class="error-message">
+            <p>Error connecting to Docker API: ${error.message}</p>
+            <p>Make sure Docker is running and the API is exposed on port 2375.</p>
+            <p>See the README for instructions on how to configure Docker to expose the API.</p>
+            <button id="retry-btn" class="retry-btn">Retry Connection</button>
+          </div>
+        `;
+        
+        // Add event listener to retry button
+        const retryBtn = document.getElementById('retry-btn');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            console.log('Retry button clicked');
+            this.checkApiAccess().then(success => {
+              if (success) {
+                // Refresh the UI if connection is successful
+                const uiController = window.uiController;
+                if (uiController) {
+                  uiController.refreshData();
+                }
+              }
+            });
+          });
+        }
+      }
+      
+      return false;
+    }
   }
 
   // Fetch all containers
   async getContainers() {
     try {
-      const response = await fetch(`${this.baseUrl}/containers/json?all=true`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      console.log('Fetching containers from Docker API...');
+      
+      // Add a timestamp to prevent caching
+      const url = `${this.baseUrl}/containers/json?all=true&t=${Date.now()}`;
+      console.log('Request URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      console.log('Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+      
       this.containers = await response.json();
+      console.log('Containers fetched:', this.containers.length);
       return this.containers;
     } catch (error) {
       console.error('Error fetching containers:', error);
@@ -22,9 +142,29 @@ class DockerClient {
   // Get detailed info about a specific container
   async getContainerInfo(containerId) {
     try {
-      const response = await fetch(`${this.baseUrl}/containers/${containerId}/json`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return await response.json();
+      console.log(`Fetching info for container: ${containerId}`);
+      
+      const url = `${this.baseUrl}/containers/${containerId}/json?t=${Date.now()}`;
+      console.log('Request URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      console.log('Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+      
+      const info = await response.json();
+      console.log('Container info fetched successfully');
+      return info;
     } catch (error) {
       console.error(`Error fetching container info for ${containerId}:`, error);
       throw error;
@@ -34,9 +174,28 @@ class DockerClient {
   // Get container stats (metrics)
   async getContainerStats(containerId) {
     try {
-      const response = await fetch(`${this.baseUrl}/containers/${containerId}/stats?stream=false`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      console.log(`Fetching stats for container: ${containerId}`);
+      
+      const url = `${this.baseUrl}/containers/${containerId}/stats?stream=false&t=${Date.now()}`;
+      console.log('Request URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      console.log('Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+      
       const stats = await response.json();
+      console.log('Container stats fetched successfully');
       
       // Process and store metrics
       this.metrics[containerId] = this.processStats(stats);
@@ -163,20 +322,33 @@ class UIController {
     
     // Initialize the UI
     this.initUI();
+    
+    // Log initialization
+    console.log('UIController initialized');
   }
   
   initUI() {
+    console.log('Initializing UI...');
+    
     // Make the container draggable
     this.initDraggable();
     
     // Set up event listeners
-    document.getElementById('refresh-btn').addEventListener('click', () => this.refreshData());
-    document.getElementById('back-btn').addEventListener('click', () => this.showContainersList());
+    document.getElementById('refresh-btn').addEventListener('click', () => {
+      console.log('Refresh button clicked');
+      this.refreshData();
+    });
+    
+    document.getElementById('back-btn').addEventListener('click', () => {
+      console.log('Back button clicked');
+      this.showContainersList();
+    });
     
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const tabName = e.target.dataset.tab;
+        console.log(`Tab switched to: ${tabName}`);
         this.switchTab(tabName);
       });
     });
@@ -187,14 +359,21 @@ class UIController {
     });
     
     document.getElementById('logs-refresh').addEventListener('click', () => {
+      console.log('Logs refresh button clicked');
       this.loadContainerLogs(this.selectedContainerId);
     });
     
     // Initial data load
+    console.log('Loading initial data...');
     this.refreshData();
     
     // Set up auto-refresh
-    this.refreshInterval = setInterval(() => this.refreshData(), 10000);
+    this.refreshInterval = setInterval(() => {
+      console.log('Auto-refresh triggered');
+      this.refreshData();
+    }, 10000);
+    
+    console.log('UI initialization complete');
   }
   
   // Initialize draggable functionality
@@ -224,8 +403,15 @@ class UIController {
   
   // Refresh all data
   async refreshData() {
+    console.log('Refreshing data...');
+    
+    // Show loading indicator
+    document.getElementById('containers-grid').innerHTML = '<div class="loading">Loading containers...</div>';
+    
     try {
       const containers = await this.dockerClient.getContainers();
+      console.log(`Refreshed ${containers.length} containers`);
+      
       this.updateContainersList(containers);
       this.updateSystemMetrics(containers);
       this.checkContainerHealth(containers);
@@ -235,6 +421,8 @@ class UIController {
         try {
           // Check if the selected container still exists
           const containerExists = containers.some(c => c.Id === this.selectedContainerId);
+          console.log(`Selected container ${this.selectedContainerId} exists: ${containerExists}`);
+          
           if (containerExists) {
             this.loadContainerDetails(this.selectedContainerId);
           } else {
@@ -253,7 +441,18 @@ class UIController {
       
       // Clear the containers grid to indicate there's a problem
       document.getElementById('containers-grid').innerHTML = 
-        '<div class="error-message">Error connecting to Docker API. Make sure Docker is running and the API is accessible.</div>';
+        `<div class="error-message">
+          <p>Error connecting to Docker API: ${error.message}</p>
+          <p>Make sure Docker is running and the API is accessible at ${this.dockerClient.baseUrl}.</p>
+          <p>Check that Docker API is exposed on port 2375 (see README for instructions).</p>
+          <button id="retry-btn" class="retry-btn">Retry Connection</button>
+        </div>`;
+      
+      // Add event listener to retry button
+      document.getElementById('retry-btn').addEventListener('click', () => {
+        console.log('Retry button clicked');
+        this.refreshData();
+      });
     }
   }
   
@@ -693,12 +892,27 @@ class UIController {
 
 // Initialize the application when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, initializing Docker Container Monitor...');
+  
   // Request notification permission
   if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-    Notification.requestPermission();
+    Notification.requestPermission().then(permission => {
+      console.log('Notification permission:', permission);
+    });
   }
   
   // Initialize Docker client and UI controller
   const dockerClient = new DockerClient();
   const uiController = new UIController(dockerClient);
+  
+  // Store UI controller in window for access from other methods
+  window.uiController = uiController;
+  
+  // Add global error handler
+  window.onerror = function(message, source, lineno, colno, error) {
+    console.error('Global error:', message, 'at', source, lineno, colno, error);
+    return false;
+  };
+  
+  console.log('Docker Container Monitor initialized');
 }); 

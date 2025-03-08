@@ -26,9 +26,9 @@ A Chrome extension to monitor Docker containers running on your system. This ext
 4. Click "Load unpacked" and select the directory containing this extension
 5. The Docker Container Monitor extension should now appear in your Chrome toolbar
 
-### Configuring Docker to Expose the API
+### Configuring Docker to Expose the API (REQUIRED)
 
-For the extension to work, you need to configure Docker to expose its API on port 2375. This can be done as follows:
+**IMPORTANT**: The extension will not work unless you configure Docker to expose its API on port 2375.
 
 #### Windows (Docker Desktop)
 
@@ -42,6 +42,17 @@ For the extension to work, you need to configure Docker to expose its API on por
    }
    ```
 4. Click "Apply & Restart"
+5. Verify the API is accessible by opening a browser and navigating to `http://localhost:2375/version` - you should see JSON output with Docker version information
+
+#### Troubleshooting Docker API Access
+
+If you're having trouble connecting to the Docker API:
+
+1. Make sure Docker is running
+2. Check that you've configured Docker to expose the API as described above
+3. Try accessing `http://localhost:2375/version` in your browser to verify the API is accessible
+4. If you're using a firewall, make sure port 2375 is allowed
+5. Try restarting Docker after making configuration changes
 
 **IMPORTANT SECURITY NOTE**: Exposing the Docker API without TLS encryption is not recommended for production environments. This extension is intended for local development and monitoring only.
 
@@ -83,9 +94,10 @@ The extension window can be moved around by dragging the header, allowing you to
 
 ## Troubleshooting
 
-- **Can't connect to Docker API**: Make sure Docker is running and the API is exposed on port 2375
+- **Can't connect to Docker API**: Make sure Docker is running and the API is exposed on port 2375. Check the "Configuring Docker to Expose the API" section above.
 - **No containers showing**: Check if you have any containers running with `docker ps`
 - **Extension not updating**: Try refreshing the extension by clicking the refresh button
+- **Back button not working**: If the back button doesn't work properly, try clicking the refresh button first
 
 ## License
 
