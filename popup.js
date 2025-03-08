@@ -232,10 +232,28 @@ class UIController {
       
       // If a container is selected, refresh its details
       if (this.selectedContainerId) {
-        this.loadContainerDetails(this.selectedContainerId);
+        try {
+          // Check if the selected container still exists
+          const containerExists = containers.some(c => c.Id === this.selectedContainerId);
+          if (containerExists) {
+            this.loadContainerDetails(this.selectedContainerId);
+          } else {
+            // If the container no longer exists, go back to the list
+            console.log('Selected container no longer exists, returning to list view');
+            this.showContainersList();
+          }
+        } catch (detailsError) {
+          console.error('Error refreshing container details:', detailsError);
+          // Don't show an alert here as it might be too noisy
+        }
       }
     } catch (error) {
+      console.error('Error refreshing data:', error);
       this.showAlert('Error connecting to Docker API: ' + error.message);
+      
+      // Clear the containers grid to indicate there's a problem
+      document.getElementById('containers-grid').innerHTML = 
+        '<div class="error-message">Error connecting to Docker API. Make sure Docker is running and the API is accessible.</div>';
     }
   }
   
@@ -375,8 +393,11 @@ class UIController {
       // Get container info
       const info = await this.dockerClient.getContainerInfo(containerId);
       
-      // Update UI
-      document.getElementById('container-name').textContent = info.Name.replace(/^\//, '');
+      // Update UI with container name (with fallback)
+      const containerName = info.Name ? info.Name.replace(/^\//, '') : 
+                           (info.Config && info.Config.Hostname) ? info.Config.Hostname :
+                           containerId.substring(0, 12);
+      document.getElementById('container-name').textContent = containerName;
       
       // Show container details panel
       document.getElementById('containers-list').classList.add('hidden');
@@ -388,6 +409,11 @@ class UIController {
       // Load container logs
       this.loadContainerLogs(containerId);
       
+      // Load metrics for this container if it's running
+      if (info.State.Running) {
+        await this.loadContainerMetrics(containerId);
+      }
+      
       // Initialize or update charts
       this.initCharts(containerId);
       
@@ -396,6 +422,9 @@ class UIController {
     } catch (error) {
       console.error(`Error loading details for ${containerId}:`, error);
       this.showAlert(`Error loading container details: ${error.message}`);
+      
+      // If there's an error, go back to the container list
+      this.showContainersList();
     }
   }
   
@@ -502,20 +531,29 @@ class UIController {
   // Initialize charts for container metrics
   initCharts(containerId) {
     // For a real implementation, you would use a charting library like Chart.js
-    // For this example, we'll just create placeholders
+    // For this example, we'll create simple placeholder charts
     
     const chartContainers = [
-      { id: 'cpu-chart', title: 'CPU Usage (%)' },
-      { id: 'memory-chart', title: 'Memory Usage (%)' },
-      { id: 'network-chart', title: 'Network I/O' },
-      { id: 'disk-chart', title: 'Disk I/O' }
+      { id: 'cpu-chart', title: 'CPU Usage (%)', dataKey: 'cpu' },
+      { id: 'memory-chart', title: 'Memory Usage (%)', dataKey: 'memory' },
+      { id: 'network-chart', title: 'Network I/O', dataKey: 'network' },
+      { id: 'disk-chart', title: 'Disk I/O', dataKey: 'disk' }
     ];
     
     chartContainers.forEach(chart => {
       const canvas = document.getElementById(chart.id);
       if (canvas) {
-        // In a real implementation, you would initialize your chart library here
-        canvas.innerHTML = `<div class="chart-placeholder">${chart.title}</div>`;
+        // Clear any existing content
+        canvas.innerHTML = '';
+        
+        // Create a simple placeholder chart
+        const chartPlaceholder = document.createElement('div');
+        chartPlaceholder.className = 'chart-placeholder';
+        chartPlaceholder.innerHTML = `
+          <h4>${chart.title}</h4>
+          <div class="chart-data" id="${chart.id}-data"></div>
+        `;
+        canvas.appendChild(chartPlaceholder);
       }
     });
     
@@ -525,9 +563,36 @@ class UIController {
   
   // Update charts with new data
   updateCharts(containerId) {
-    // In a real implementation, you would update your charts with new data
-    // For this example, we'll just log the data
-    console.log('Updating charts with data:', this.metricsHistory[containerId]);
+    // Make sure we have metrics history for this container
+    if (!this.metricsHistory[containerId]) {
+      console.log('No metrics history available for container:', containerId);
+      return;
+    }
+    
+    const history = this.metricsHistory[containerId];
+    
+    // Update each chart with the latest data
+    const cpuChart = document.getElementById('cpu-chart-data');
+    if (cpuChart && history.cpu.length > 0) {
+      cpuChart.textContent = `Current: ${history.cpu[history.cpu.length - 1]}%`;
+    }
+    
+    const memoryChart = document.getElementById('memory-chart-data');
+    if (memoryChart && history.memory.length > 0) {
+      memoryChart.textContent = `Current: ${history.memory[history.memory.length - 1]}%`;
+    }
+    
+    const networkChart = document.getElementById('network-chart-data');
+    if (networkChart && history.network.rx.length > 0) {
+      networkChart.textContent = `RX: ${history.network.rx[history.network.rx.length - 1]} | TX: ${history.network.tx[history.network.tx.length - 1]}`;
+    }
+    
+    const diskChart = document.getElementById('disk-chart-data');
+    if (diskChart && history.disk.read.length > 0) {
+      diskChart.textContent = `Read: ${history.disk.read[history.disk.read.length - 1]} | Write: ${history.disk.write[history.disk.write.length - 1]}`;
+    }
+    
+    console.log('Updated charts with data for container:', containerId);
   }
   
   // Switch between tabs in container details
@@ -554,6 +619,9 @@ class UIController {
     this.selectedContainerId = null;
     document.getElementById('container-details').classList.add('hidden');
     document.getElementById('containers-list').classList.remove('hidden');
+    
+    // Refresh the data to ensure the container list is up-to-date
+    this.refreshData();
   }
   
   // Check container health and show alerts
