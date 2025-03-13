@@ -9,6 +9,10 @@ class DockerClient {
     
     // Check if Docker API is accessible
     this.checkApiAccess();
+    
+    // Storage for container metrics
+    this.metrics = {};
+    this.lastMetricTimestamps = {};
   }
   
   // Load settings from storage
@@ -17,7 +21,6 @@ class DockerClient {
       const settings = result.settings || {};
       this.baseUrl = settings.dockerApiUrl || 'http://localhost:2375';
       this.containers = [];
-      this.metrics = {};
       
       console.log('Settings loaded:', settings);
     });
@@ -194,7 +197,9 @@ class DockerClient {
         method: 'GET',
         headers: {
           'Accept': 'application/json'
-        }
+        },
+        // Add a timeout to prevent hanging requests
+        signal: AbortSignal.timeout(5000)
       });
       
       console.log('Response status:', response.status);
@@ -209,8 +214,11 @@ class DockerClient {
       console.log('Container stats fetched successfully');
       
       // Process and store metrics
-      this.metrics[containerId] = this.processStats(stats);
-      return this.metrics[containerId];
+      const processedMetrics = this.processStats(stats);
+      this.metrics[containerId] = processedMetrics;
+      this.lastMetricTimestamps[containerId] = Date.now();
+      
+      return processedMetrics;
     } catch (error) {
       console.error(`Error fetching stats for ${containerId}:`, error);
       throw error;
@@ -259,7 +267,14 @@ class DockerClient {
       networkTx: this.formatBytes(networkTx),
       blockRead: this.formatBytes(blockRead),
       blockWrite: this.formatBytes(blockWrite),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      // Add raw values for better charting
+      rawMemoryUsage: memoryUsage,
+      rawMemoryLimit: memoryLimit,
+      rawNetworkRx: networkRx,
+      rawNetworkTx: networkTx,
+      rawBlockRead: blockRead,
+      rawBlockWrite: blockWrite
     };
   }
 
@@ -330,6 +345,7 @@ class UIController {
     this.refreshInterval = null;
     this.isDragging = false;
     this.dragOffset = { x: 0, y: 0 };
+    this.selectedTab = 'metrics'; // Add property to track selected tab
     
     // Default settings
     this.settings = {
@@ -347,6 +363,19 @@ class UIController {
     
     // Log initialization
     console.log('UIController initialized');
+  }
+  
+  // Helper function to format bytes (copied from DockerClient for direct access)
+  formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
   
   // Load settings from storage
@@ -520,7 +549,14 @@ class UIController {
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const tabName = e.target.dataset.tab;
-        console.log(`Tab switched to: ${tabName}`);
+        console.log(`Tab button clicked: ${tabName}`);
+        
+        // Prevent unnecessary tab switches
+        if (this.selectedTab === tabName) {
+          console.log(`Tab ${tabName} is already active, ignoring click`);
+          return;
+        }
+        
         this.switchTab(tabName);
       });
     });
@@ -577,6 +613,10 @@ class UIController {
   async refreshData() {
     console.log('Refreshing data...');
     
+    // Store current tab before refresh
+    const currentTab = this.selectedTab;
+    console.log(`Current tab before refresh: ${currentTab}`);
+    
     // Show loading indicator
     document.getElementById('containers-grid').innerHTML = '<div class="loading">Loading containers...</div>';
     
@@ -596,7 +636,13 @@ class UIController {
           console.log(`Selected container ${this.selectedContainerId} exists: ${containerExists}`);
           
           if (containerExists) {
-            this.loadContainerDetails(this.selectedContainerId);
+            // Keep current tab selection during refresh
+            const currentTab = this.selectedTab; 
+            await this.loadContainerDetails(this.selectedContainerId);
+            // Restore the tab that was active before refresh
+            if (currentTab) {
+              this.switchTab(currentTab);
+            }
           } else {
             // If the container no longer exists, go back to the list
             console.log('Selected container no longer exists, returning to list view');
@@ -684,7 +730,10 @@ class UIController {
   // Load metrics for a specific container
   async loadContainerMetrics(containerId) {
     try {
+      console.log(`Loading metrics for container: ${containerId}`);
+      
       const metrics = await this.dockerClient.getContainerStats(containerId);
+      console.log(`Metrics received for ${containerId}:`, metrics);
       
       // Update the card metrics
       const cpuElement = document.getElementById(`cpu-${containerId}`);
@@ -702,16 +751,19 @@ class UIController {
           disk: { read: [], write: [] },
           timestamps: []
         };
+        console.log(`Created new metrics history for ${containerId}`);
       }
       
       const history = this.metricsHistory[containerId];
       history.cpu.push(parseFloat(metrics.cpuPercent));
       history.memory.push(parseFloat(metrics.memoryPercent));
-      history.network.rx.push(metrics.networkRx);
-      history.network.tx.push(metrics.networkTx);
-      history.disk.read.push(metrics.blockRead);
-      history.disk.write.push(metrics.blockWrite);
+      history.network.rx.push(metrics.rawNetworkRx);
+      history.network.tx.push(metrics.rawNetworkTx);
+      history.disk.read.push(metrics.rawBlockRead);
+      history.disk.write.push(metrics.rawBlockWrite);
       history.timestamps.push(new Date());
+      
+      console.log(`Added metrics to history for ${containerId}, history length: ${history.cpu.length}`);
       
       // Keep only the last 20 data points
       if (history.cpu.length > 20) {
@@ -724,14 +776,10 @@ class UIController {
         history.timestamps.shift();
       }
       
-      // Update charts if this is the selected container
-      if (this.selectedContainerId === containerId) {
-        this.updateCharts(containerId);
-      }
-      
       return metrics;
     } catch (error) {
       console.error(`Error loading metrics for ${containerId}:`, error);
+      throw error;
     }
   }
   
@@ -764,6 +812,13 @@ class UIController {
     this.selectedContainerId = containerId;
     
     try {
+      // Clear any existing metrics update interval
+      if (this.metricsUpdateInterval) {
+        clearInterval(this.metricsUpdateInterval);
+        this.metricsUpdateInterval = null;
+        console.log('Cleared previous metrics update interval');
+      }
+      
       // Get container info
       const info = await this.dockerClient.getContainerInfo(containerId);
       console.log('Container info loaded successfully');
@@ -796,6 +851,21 @@ class UIController {
           detailsView.style.display = 'flex';
           console.log('Container details view shown (direct style)');
         }
+
+        // Hide metrics tab button and tab content
+        const metricsTabBtn = document.querySelector('.tab-btn[data-tab="metrics"]');
+        if (metricsTabBtn) {
+          metricsTabBtn.style.display = 'none';
+          console.log('Metrics tab button hidden');
+        }
+
+        const metricsTabContent = document.getElementById('metrics-tab');
+        if (metricsTabContent) {
+          metricsTabContent.classList.add('hidden');
+          metricsTabContent.style.display = 'none';
+          console.log('Metrics tab content hidden');
+        }
+        
       } catch (viewError) {
         console.error('Error toggling views:', viewError);
       }
@@ -806,16 +876,14 @@ class UIController {
       // Load container logs
       this.loadContainerLogs(containerId);
       
-      // Load metrics for this container if it's running
-      if (info.State && info.State.Running) {
-        await this.loadContainerMetrics(containerId);
+      // Only switch to logs tab by default on first load, otherwise keep the last selected tab
+      const isSameContainer = this.lastLoadedContainerId === containerId;
+      if (!isSameContainer) {
+        this.selectedTab = 'logs'; // Default to logs tab instead of metrics
       }
-      
-      // Initialize or update charts
-      this.initCharts(containerId);
-      
-      // Switch to metrics tab by default
-      this.switchTab('metrics');
+      this.lastLoadedContainerId = containerId;
+      console.log(`Switching to tab: ${this.selectedTab} (same container: ${isSameContainer})`);
+      this.switchTab(this.selectedTab);
       
       console.log('Container details loaded successfully');
       return true;
@@ -827,6 +895,38 @@ class UIController {
       this.showContainersList();
       return false;
     }
+  }
+  
+  // Set up a separate interval to update metrics for the selected container
+  setupMetricsUpdateInterval(containerId) {
+    console.log(`Setting up metrics update interval for container: ${containerId}`);
+    
+    // Clear any existing update interval
+    if (this.metricsUpdateInterval) {
+      clearInterval(this.metricsUpdateInterval);
+      this.metricsUpdateInterval = null;
+    }
+    
+    // Set up a new update interval
+    this.metricsUpdateInterval = setInterval(async () => {
+      if (this.selectedContainerId === containerId) {
+        console.log(`Updating metrics for selected container: ${containerId}`);
+        try {
+          const metrics = await this.loadContainerMetrics(containerId);
+          
+          // Only update charts if metrics tab is currently active
+          if (this.selectedTab === 'metrics') {
+            this.updateCharts(containerId);
+          }
+        } catch (error) {
+          console.error(`Error updating metrics for ${containerId}:`, error);
+        }
+      } else {
+        // If the selected container has changed, clear this interval
+        clearInterval(this.metricsUpdateInterval);
+        this.metricsUpdateInterval = null;
+      }
+    }, 2000); // Update metrics every 2 seconds
   }
   
   // Load container info tab
@@ -931,8 +1031,7 @@ class UIController {
   
   // Initialize charts for container metrics
   initCharts(containerId) {
-    // For a real implementation, you would use a charting library like Chart.js
-    // For this example, we'll create simple placeholder charts
+    console.log(`Initializing charts for container: ${containerId}`);
     
     const chartContainers = [
       { id: 'cpu-chart', title: 'CPU Usage (%)', dataKey: 'cpu' },
@@ -952,53 +1051,178 @@ class UIController {
         chartPlaceholder.className = 'chart-placeholder';
         chartPlaceholder.innerHTML = `
           <h4>${chart.title}</h4>
-          <div class="chart-data" id="${chart.id}-data"></div>
+          <div class="chart-data" id="${chart.id}-data">
+            <div class="loading-metrics">Loading metrics...</div>
+          </div>
         `;
         canvas.appendChild(chartPlaceholder);
+        console.log(`Created chart placeholder for ${chart.id}`);
+      } else {
+        console.warn(`Chart canvas element not found: ${chart.id}`);
       }
     });
-    
-    // Update charts with current data
-    this.updateCharts(containerId);
   }
   
   // Update charts with new data
   updateCharts(containerId) {
-    // Make sure we have metrics history for this container
-    if (!this.metricsHistory[containerId]) {
-      console.log('No metrics history available for container:', containerId);
-      return;
+    console.log(`Updating charts for container: ${containerId}`);
+    
+    try {
+      // Make sure we have metrics history for this container
+      if (!this.metricsHistory[containerId]) {
+        console.log('No metrics history available for container:', containerId);
+        
+        // Show no data message in all charts
+        document.querySelectorAll('.chart-data').forEach(chart => {
+          chart.innerHTML = '<div class="metric-warning">No metrics data available</div>';
+        });
+        return;
+      }
+      
+      const history = this.metricsHistory[containerId];
+      
+      // Check if we have any data points
+      if (history.cpu.length === 0) {
+        console.log('Metrics history is empty for container:', containerId);
+        
+        // Show no data message in all charts
+        document.querySelectorAll('.chart-data').forEach(chart => {
+          chart.innerHTML = '<div class="metric-warning">No metrics data available</div>';
+        });
+        return;
+      }
+      
+      console.log(`Updating charts with ${history.cpu.length} data points`);
+      
+      // Update each chart with the latest data
+      const cpuChart = document.getElementById('cpu-chart-data');
+      if (cpuChart && history.cpu.length > 0) {
+        const latestCpu = history.cpu[history.cpu.length - 1];
+        cpuChart.innerHTML = `
+          <div class="metric-large">${latestCpu.toFixed(2)}%</div>
+          <div class="metric-trend">${this.getTrend(history.cpu, 5)}</div>
+        `;
+        console.log(`Updated CPU chart with value: ${latestCpu.toFixed(2)}%`);
+      } else {
+        console.warn('CPU chart element not found or no CPU data available');
+        if (cpuChart) {
+          cpuChart.innerHTML = '<div class="metric-warning">No CPU data available</div>';
+        }
+      }
+      
+      const memoryChart = document.getElementById('memory-chart-data');
+      if (memoryChart && history.memory.length > 0) {
+        const latestMemory = history.memory[history.memory.length - 1];
+        memoryChart.innerHTML = `
+          <div class="metric-large">${latestMemory.toFixed(2)}%</div>
+          <div class="metric-trend">${this.getTrend(history.memory, 5)}</div>
+        `;
+        console.log(`Updated Memory chart with value: ${latestMemory.toFixed(2)}%`);
+      } else {
+        console.warn('Memory chart element not found or no memory data available');
+        if (memoryChart) {
+          memoryChart.innerHTML = '<div class="metric-warning">No memory data available</div>';
+        }
+      }
+      
+      const networkChart = document.getElementById('network-chart-data');
+      if (networkChart && history.network.rx.length > 0) {
+        const latestRx = history.network.rx[history.network.rx.length - 1];
+        const latestTx = history.network.tx[history.network.tx.length - 1];
+        
+        try {
+          networkChart.innerHTML = `
+            <div class="metric-large">RX: ${this.formatBytes(latestRx)}</div>
+            <div class="metric-large">TX: ${this.formatBytes(latestTx)}</div>
+          `;
+          console.log(`Updated Network chart with RX: ${this.formatBytes(latestRx)}, TX: ${this.formatBytes(latestTx)}`);
+        } catch (formatError) {
+          console.error('Error formatting network metrics:', formatError);
+          networkChart.innerHTML = `
+            <div class="metric-large">RX: ${latestRx} bytes</div>
+            <div class="metric-large">TX: ${latestTx} bytes</div>
+          `;
+        }
+      } else {
+        console.warn('Network chart element not found or no network data available');
+        if (networkChart) {
+          networkChart.innerHTML = '<div class="metric-warning">No network data available</div>';
+        }
+      }
+      
+      const diskChart = document.getElementById('disk-chart-data');
+      if (diskChart && history.disk.read.length > 0) {
+        const latestRead = history.disk.read[history.disk.read.length - 1];
+        const latestWrite = history.disk.write[history.disk.write.length - 1];
+        
+        try {
+          diskChart.innerHTML = `
+            <div class="metric-large">Read: ${this.formatBytes(latestRead)}</div>
+            <div class="metric-large">Write: ${this.formatBytes(latestWrite)}</div>
+          `;
+          console.log(`Updated Disk chart with Read: ${this.formatBytes(latestRead)}, Write: ${this.formatBytes(latestWrite)}`);
+        } catch (formatError) {
+          console.error('Error formatting disk metrics:', formatError);
+          diskChart.innerHTML = `
+            <div class="metric-large">Read: ${latestRead} bytes</div>
+            <div class="metric-large">Write: ${latestWrite} bytes</div>
+          `;
+        }
+      } else {
+        console.warn('Disk chart element not found or no disk data available');
+        if (diskChart) {
+          diskChart.innerHTML = '<div class="metric-warning">No disk I/O data available</div>';
+        }
+      }
+    } catch (error) {
+      console.error('Error updating charts:', error);
+      // Display error message in charts if possible
+      const chartData = document.querySelectorAll('.chart-data');
+      chartData.forEach(chart => {
+        try {
+          chart.innerHTML = `<div class="metric-error">Error updating metrics: ${error.message}</div>`;
+        } catch (displayError) {
+          console.error('Could not display error message:', displayError);
+        }
+      });
     }
+  }
+  
+  // Calculate trend (up, down, stable) based on recent values
+  getTrend(values, count = 5) {
+    if (values.length < 2) return '➡️ Stable';
     
-    const history = this.metricsHistory[containerId];
+    // Take the last 'count' values or all if less than 'count'
+    const samples = values.slice(-Math.min(count, values.length));
+    const first = samples[0];
+    const last = samples[samples.length - 1];
     
-    // Update each chart with the latest data
-    const cpuChart = document.getElementById('cpu-chart-data');
-    if (cpuChart && history.cpu.length > 0) {
-      cpuChart.textContent = `Current: ${history.cpu[history.cpu.length - 1]}%`;
-    }
+    // Calculate percentage change
+    const change = ((last - first) / Math.abs(first || 1)) * 100;
     
-    const memoryChart = document.getElementById('memory-chart-data');
-    if (memoryChart && history.memory.length > 0) {
-      memoryChart.textContent = `Current: ${history.memory[history.memory.length - 1]}%`;
-    }
-    
-    const networkChart = document.getElementById('network-chart-data');
-    if (networkChart && history.network.rx.length > 0) {
-      networkChart.textContent = `RX: ${history.network.rx[history.network.rx.length - 1]} | TX: ${history.network.tx[history.network.tx.length - 1]}`;
-    }
-    
-    const diskChart = document.getElementById('disk-chart-data');
-    if (diskChart && history.disk.read.length > 0) {
-      diskChart.textContent = `Read: ${history.disk.read[history.disk.read.length - 1]} | Write: ${history.disk.write[history.disk.write.length - 1]}`;
-    }
-    
-    console.log('Updated charts with data for container:', containerId);
+    if (change > 5) return '⬆️ Increasing';
+    if (change < -5) return '⬇️ Decreasing';
+    return '➡️ Stable';
   }
   
   // Switch between tabs in container details
   switchTab(tabName) {
     console.log(`Switching to tab: ${tabName}`);
+    
+    // Don't switch to metrics tab as it's hidden
+    if (tabName === 'metrics') {
+      console.log('Metrics tab is disabled, switching to logs tab instead');
+      tabName = 'logs';
+    }
+    
+    // Don't do anything if the selected tab is already active
+    if (this.selectedTab === tabName) {
+      console.log(`Tab ${tabName} is already active, ignoring switch request`);
+      return;
+    }
+    
+    // Store the selected tab
+    this.selectedTab = tabName;
     
     try {
       // Hide all tabs
@@ -1006,6 +1230,10 @@ class UIController {
       if (tabContents.length > 0) {
         tabContents.forEach(tab => {
           tab.classList.remove('active');
+          // Ensure display style is also removed in case of direct style manipulation
+          if (tab.style) {
+            tab.style.display = 'none';
+          }
         });
         console.log('All tabs hidden');
       } else {
@@ -1027,6 +1255,10 @@ class UIController {
       const selectedTab = document.getElementById(`${tabName}-tab`);
       if (selectedTab) {
         selectedTab.classList.add('active');
+        // Ensure display style is also set in case of direct style manipulation
+        if (selectedTab.style) {
+          selectedTab.style.display = 'block';
+        }
         console.log(`Tab ${tabName} activated`);
       } else {
         console.warn(`Tab element ${tabName}-tab not found`);
@@ -1040,6 +1272,11 @@ class UIController {
       } else {
         console.warn(`Tab button for ${tabName} not found`);
       }
+      
+      // If switching to logs tab, refresh the logs
+      if (tabName === 'logs' && this.selectedContainerId) {
+        this.loadContainerLogs(this.selectedContainerId);
+      }
     } catch (error) {
       console.error('Error switching tabs:', error);
     }
@@ -1048,6 +1285,13 @@ class UIController {
   // Show container list (go back from details)
   showContainersList() {
     console.log('Showing containers list view (back button pressed)');
+    
+    // Clear any metrics update interval
+    if (this.metricsUpdateInterval) {
+      clearInterval(this.metricsUpdateInterval);
+      this.metricsUpdateInterval = null;
+      console.log('Cleared metrics update interval');
+    }
     
     // Clear the selected container ID
     this.selectedContainerId = null;
